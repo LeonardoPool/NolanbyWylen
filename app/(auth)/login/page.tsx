@@ -56,10 +56,10 @@ export default async function LoginPage() {
         {/* Frase editorial — centrada verticalmente, protagonista tipográfico */}
         <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-12 pb-16 text-center">
           <h2 className="text-4xl xl:text-5xl font-bold tracking-tight text-white leading-[1.12] drop-shadow-sm">
-            Sabe siempre quién llegó primero.
+            ENGINEERING THAT INSPIRES.
           </h2>
           <p className="mt-4 text-sm text-white/60 font-normal tracking-wide">
-            El control de asistencia que tu taller mecánico merecía.
+            Un ecosistema de WYLEN.
           </p>
         </div>
       </div>
