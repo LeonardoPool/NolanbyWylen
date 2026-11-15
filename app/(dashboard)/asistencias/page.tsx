@@ -1,74 +1,74 @@
-import { Clock, Calendar, Download, Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Suspense } from "react";
+import { connection } from "next/server";
+import { obtenerAsistenciasPeriodo } from "@/features/asistencias/actions";
+import { obtenerCatalogoEmpleados } from "@/features/empleados/actions";
+import { AsistenciasVista } from "@/features/asistencias/components/asistencias-vista";
+import { Card, CardContent } from "@/components/ui/card";
+import { Loader2 } from "lucide-react";
 
-export default function AsistenciasPage() {
+function AsistenciasSkeleton() {
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-zinc-900">
-            Control de Asistencias
-          </h1>
-          <p className="text-xs text-zinc-500">
-            Historial inmutable de marcajes de entrada y salida de Servicio Mecánico López.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="text-xs text-zinc-700">
-            <Download className="h-3.5 w-3.5 mr-1 text-zinc-400" strokeWidth={1.5} />
-            Exportar Vista
-          </Button>
-          <Button size="sm" className="text-xs">
-            <Plus className="h-3.5 w-3.5 mr-1" strokeWidth={1.5} />
-            Marcaje Manual
-          </Button>
-        </div>
+    <div className="space-y-6 animate-pulse">
+      <div className="h-8 w-64 bg-zinc-200 rounded-xl" />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="h-20 bg-zinc-100 rounded-2xl border border-zinc-200/60" />
+        ))}
       </div>
-
-      {/* Date Filter Bar */}
-      <Card>
-        <CardContent className="p-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2 text-xs text-zinc-600">
-              <Calendar className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.5} />
-              <span className="font-medium text-zinc-800">Período:</span>
-              <span className="rounded bg-zinc-100 px-2 py-0.5 text-zinc-700 border border-zinc-200/60 font-medium">
-                Hoy (En curso)
-              </span>
-            </div>
-            <div className="flex items-center gap-1">
-              <Button variant="ghost" size="sm" className="text-xs text-zinc-600 h-8">Esta semana</Button>
-              <Button variant="ghost" size="sm" className="text-xs text-zinc-600 h-8">Quincena actual</Button>
-              <Button variant="ghost" size="sm" className="text-xs text-zinc-600 h-8">Mes actual</Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Main Table / Empty State */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Marcajes del Período</CardTitle>
-          <CardDescription>
-            Trazabilidad con método de registro y dispositivo de origen.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="h-10 w-10 rounded-full bg-zinc-100 flex items-center justify-center text-zinc-400 mb-3 border border-zinc-200/60">
-              <Clock className="h-5 w-5" strokeWidth={1.5} />
-            </div>
-            <h3 className="text-xs font-semibold text-zinc-800">
-              No hay marcajes para el rango seleccionado
-            </h3>
-            <p className="text-[11px] text-zinc-400 mt-1 max-w-xs leading-relaxed">
-              Las checadas transmitidas por el checador o registradas manualmente quedarán asentadas aquí.
-            </p>
-          </div>
+      <div className="h-24 bg-zinc-100 rounded-2xl border border-zinc-200/60" />
+      <Card className="rounded-2xl border-zinc-200">
+        <CardContent className="p-8 flex flex-col items-center justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-zinc-400 mb-2" />
+          <p className="text-xs text-zinc-400">Cargando control de asistencias...</p>
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+async function AsistenciasContenido() {
+  await connection();
+
+  const ahora = new Date();
+  const dia = ahora.getDate();
+  let inicio = new Date(ahora);
+  let fin = new Date(ahora);
+
+  // Quincena actual por defecto
+  if (dia <= 15) {
+    inicio = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
+    fin = new Date(ahora.getFullYear(), ahora.getMonth(), 15);
+  } else {
+    inicio = new Date(ahora.getFullYear(), ahora.getMonth(), 16);
+    fin = new Date(ahora.getFullYear(), ahora.getMonth() + 1, 0);
+  }
+
+  const iniStr = inicio.toISOString().slice(0, 10);
+  const finStr = fin.toISOString().slice(0, 10);
+
+  const [asistenciasRes, empleadosRes] = await Promise.all([
+    obtenerAsistenciasPeriodo({
+      fechaInicio: iniStr,
+      fechaFin: finStr,
+    }),
+    obtenerCatalogoEmpleados(),
+  ]);
+
+  return (
+    <AsistenciasVista
+      jornadasIniciales={asistenciasRes.jornadas}
+      resumenInicial={asistenciasRes.resumen}
+      empleados={empleadosRes.empleados}
+      fechaInicioDefault={iniStr}
+      fechaFinDefault={finStr}
+    />
+  );
+}
+
+export default function AsistenciasPage() {
+  return (
+    <Suspense fallback={<AsistenciasSkeleton />}>
+      <AsistenciasContenido />
+    </Suspense>
   );
 }

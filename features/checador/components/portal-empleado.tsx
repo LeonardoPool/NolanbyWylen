@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useState, useEffect, useTransition, useCallback } from "react";
+import { useState, useEffect, useTransition, useCallback, useRef } from "react";
 import Image from "next/image";
 import {
   MapPin,
@@ -24,6 +24,9 @@ import {
   ChevronRight,
   ExternalLink,
   Plane,
+  Camera,
+  CameraOff,
+  ScanFace,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -81,6 +84,59 @@ export function PortalEmpleado() {
   const [fechaFin, setFechaFin] = useState("");
   const [motivo, setMotivo] = useState("");
   const [isSendingIncidencia, startIncidenciaTransition] = useTransition();
+
+  // Modal Verificación Facial (LFT Identidad Inequívoca)
+  const [modalCamara, setModalCamara] = useState(false);
+  const [eventoPendiente, setEventoPendiente] = useState<TipoEventoChecador | null>(null);
+  const [camaraActiva, setCamaraActiva] = useState(false);
+  const [camaraError, setCamaraError] = useState<string | null>(null);
+  const [capturandoFoto, setCapturandoFoto] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  // Iniciar cámara frontal
+  async function iniciarCamara() {
+    setCamaraError(null);
+    setCamaraActiva(false);
+
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setCamaraError("Tu navegador no soporta captura de video en vivo.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 480 }, height: { ideal: 480 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      setCamaraActiva(true);
+    } catch {
+      setCamaraError("Permiso de cámara denegado. Puedes registrar sin foto si es necesario.");
+    }
+  }
+
+  // Detener cámara
+  function detenerCamara() {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    setCamaraActiva(false);
+  }
+
+  // Limpieza al desmontar
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+      }
+    };
+  }, []);
 
   // Reloj en vivo
   useEffect(() => {
@@ -220,7 +276,7 @@ export function PortalEmpleado() {
     });
   }
 
-  // Registrar Asistencia
+  // Iniciar flujo de marcaje con verificación facial
   function handleMarcaje(tipoEvento: TipoEventoChecador) {
     if (!empleado) return;
 
@@ -230,12 +286,66 @@ export function PortalEmpleado() {
       return;
     }
 
+    setEventoPendiente(tipoEvento);
+    setModalCamara(true);
+    iniciarCamara();
+  }
+
+  // Tomar foto instantánea y enviar marcaje
+  async function capturarFotoYRegistrar() {
+    if (!empleado || !coords || !eventoPendiente) return;
+    setCapturandoFoto(true);
+
+    let fotoDataUrl: string | undefined = undefined;
+
+    if (videoRef.current && camaraActiva) {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 320;
+        canvas.height = 320;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          // Centrar y recortar cuadrado
+          const vWidth = videoRef.current.videoWidth || 320;
+          const vHeight = videoRef.current.videoHeight || 320;
+          const size = Math.min(vWidth, vHeight);
+          const startX = (vWidth - size) / 2;
+          const startY = (vHeight - size) / 2;
+
+          ctx.drawImage(videoRef.current, startX, startY, size, size, 0, 0, 320, 320);
+          fotoDataUrl = canvas.toDataURL("image/jpeg", 0.65);
+        }
+      } catch {
+        // Fallback si falla captura
+      }
+    }
+
+    detenerCamara();
+    setModalCamara(false);
+
+    await ejecutarMarcajeFinal(eventoPendiente, fotoDataUrl);
+    setCapturandoFoto(false);
+  }
+
+  // Ejecutar marcaje sin foto en caso de falla de hardware
+  async function omitirFotoYRegistrar() {
+    if (!eventoPendiente) return;
+    detenerCamara();
+    setModalCamara(false);
+    await ejecutarMarcajeFinal(eventoPendiente, undefined);
+  }
+
+  // Llamada final al servidor con coordenadas y selfie
+  async function ejecutarMarcajeFinal(tipoEvento: TipoEventoChecador, fotoBase64?: string) {
+    if (!empleado || !coords) return;
+
     startMarkingTransition(async () => {
       const res = await registrarMarcajeOnline({
         empleadoId: empleado.id,
         tipoEvento,
         latitud: coords.lat,
         longitud: coords.lng,
+        fotoBase64,
       });
 
       if (!res.success) {
@@ -247,7 +357,6 @@ export function PortalEmpleado() {
       }
 
       notify.success(res.esViaje ? "Marcaje en viaje registrado" : "Marcaje Registrado", res.message);
-      // Refrescar marcajes del día
       const marcajesActualizados = await obtenerMarcajesDelDia(empleado.id);
       setAsistenciasHoy(marcajesActualizados);
     });
@@ -788,6 +897,93 @@ export function PortalEmpleado() {
                 </Button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Validación Facial (LFT Art. 132 fr. XXXIV - Identidad Inequívoca) */}
+      {modalCamara && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-5 shadow-2xl space-y-4 border border-zinc-200 text-center">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-900">
+                <ScanFace className="h-4 w-4 text-blue-600" />
+                <span>Verificación Facial LFT</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  detenerCamara();
+                  setModalCamara(false);
+                }}
+                className="text-zinc-400 hover:text-zinc-700"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="text-[11px] text-zinc-500 leading-relaxed">
+              Para garantizar tu <strong>identidad inalterable</strong> según la normativa laboral, coloca tu rostro frente a la cámara:
+            </p>
+
+            {/* Visor de Cámara */}
+            <div className="relative w-52 h-52 mx-auto rounded-full overflow-hidden border-4 border-blue-600 shadow-inner bg-zinc-900 flex items-center justify-center">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className={`w-full h-full object-cover scale-x-[-1] ${
+                  camaraActiva ? "block" : "hidden"
+                }`}
+              />
+              {!camaraActiva && !camaraError && (
+                <div className="flex flex-col items-center justify-center text-zinc-400 space-y-2">
+                  <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+                  <span className="text-[10px]">Activando cámara...</span>
+                </div>
+              )}
+              {camaraError && (
+                <div className="p-4 text-center text-zinc-300 space-y-2">
+                  <CameraOff className="h-6 w-6 mx-auto text-amber-400" />
+                  <p className="text-[10px] leading-tight">{camaraError}</p>
+                </div>
+              )}
+              {/* Guía facial */}
+              <div className="absolute inset-4 rounded-full border-2 border-dashed border-white/60 pointer-events-none" />
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <Button
+                type="button"
+                onClick={capturarFotoYRegistrar}
+                disabled={capturandoFoto || isMarking}
+                className="w-full h-10 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-md"
+              >
+                {capturandoFoto || isMarking ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                    Validando y Guardando...
+                  </>
+                ) : (
+                  <>
+                    <Camera className="h-4 w-4 mr-1.5" />
+                    Tomar Foto y Registrar {eventoPendiente?.replace("_", " ")}
+                  </>
+                )}
+              </Button>
+
+              <div>
+                <button
+                  type="button"
+                  onClick={omitirFotoYRegistrar}
+                  disabled={capturandoFoto || isMarking}
+                  className="text-[11px] text-zinc-500 hover:text-zinc-800 underline decoration-zinc-300 hover:decoration-zinc-600 cursor-pointer"
+                >
+                  Omitir foto y registrar solo con GPS
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

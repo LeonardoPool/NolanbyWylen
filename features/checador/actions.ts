@@ -163,6 +163,7 @@ export async function registrarMarcajeOnline(params: {
   tipoEvento: TipoEventoChecador;
   latitud: number;
   longitud: number;
+  fotoBase64?: string;
 }): Promise<{
   success: boolean;
   message?: string;
@@ -173,7 +174,7 @@ export async function registrarMarcajeOnline(params: {
   esViaje?: boolean;
   asistencia?: AsistenciaRow;
 }> {
-  const { empleadoId, tipoEvento, latitud, longitud } = params;
+  const { empleadoId, tipoEvento, latitud, longitud, fotoBase64 } = params;
 
   if (!empleadoId) {
     return { success: false, error: "Identificador de empleado no válido." };
@@ -301,6 +302,8 @@ export async function registrarMarcajeOnline(params: {
     longitud,
     distancia_metros: distanciaFinal,
     fecha_cliente: fechaStr,
+    foto_verificacion: fotoBase64 || null,
+    validacion_identidad: fotoBase64 ? "BIOMETRIA_FOTOGRAFICA" : "PIN_GPS",
   };
 
   const { data: nuevaAsistencia, error: insertError } = await adminClient
