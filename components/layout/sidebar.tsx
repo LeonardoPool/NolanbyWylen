@@ -11,6 +11,7 @@ import {
   Settings,
   Radio,
   LogOut,
+  Smartphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { cerrarSesion } from "@/features/auth/actions";
@@ -41,6 +42,11 @@ const navigationItems = [
     name: "Configuración",
     href: "/configuracion",
     icon: Settings,
+  },
+  {
+    name: "Checador Online",
+    href: "/checador",
+    icon: Smartphone,
   },
 ];
 
