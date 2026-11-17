@@ -2,10 +2,10 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    id: "/",
-    name: "NOLAN by WYLEN",
+    id: "/admin",
+    name: "NOLAN Administrador",
     short_name: "NOLAN",
-    description: "Sistema de Control de Asistencia — Servicio Mecánico López",
+    description: "Panel Administrativo y Control de Asistencia — Servicio Mecánico López",
     start_url: "/",
     scope: "/",
     display: "standalone",
@@ -15,22 +15,28 @@ export default function manifest(): MetadataRoute.Manifest {
     categories: ["business", "productivity", "utilities"],
     icons: [
       {
-        src: "/icons/icon-192.png",
+        src: "/icons/admin-192.png",
         sizes: "192x192",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/icons/icon-512.png",
+        src: "/icons/admin-512.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/icons/icon-maskable-512.png",
+        src: "/icons/admin-maskable-512.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable",
+      },
+      {
+        src: "/icons/admin-apple-touch-icon.png",
+        sizes: "180x180",
+        type: "image/png",
+        purpose: "any",
       },
       {
         src: "/apple-touch-icon.png",

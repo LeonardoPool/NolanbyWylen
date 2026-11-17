@@ -26,7 +26,8 @@ export const metadata: Metadata = {
   },
   description:
     "Sistema de Control de Asistencia para Servicio Mecánico López. Diseñado por WYLEN.",
-  applicationName: "NOLAN by WYLEN",
+  applicationName: "NOLAN Administrador",
+  manifest: "/manifest-admin.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -38,12 +39,12 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       { url: "/isotipo-nolan.png", type: "image/png" },
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
-      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+      { url: "/icons/admin-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/admin-512.png", sizes: "512x512", type: "image/png" },
     ],
     apple: [
+      { url: "/icons/admin-apple-touch-icon.png", sizes: "180x180", type: "image/png" },
       { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
-      { url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
     ],
   },
 };
@@ -55,9 +56,6 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es" className={`${manrope.variable} h-full antialiased`}>
-      <head>
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-      </head>
       <body className="min-h-full flex flex-col font-sans bg-[#FAF9F6] text-zinc-900">
         <Toaster position="top-right" theme="light" />
         <PwaRegistrar />

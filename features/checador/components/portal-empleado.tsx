@@ -559,7 +559,7 @@ export function PortalEmpleado() {
                     onChange={(e) => setIdentificador(e.target.value)}
                     placeholder="Ej. CURP o tu correo"
                     disabled={isLoggingIn}
-                    className="w-full rounded-xl border border-zinc-200 bg-[#F9F9FB] px-3.5 py-2.5 text-xs text-zinc-900 uppercase placeholder:normal-case placeholder:text-zinc-400 focus:bg-white focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/5 transition-all"
+                    className="w-full min-h-[46px] rounded-xl border border-zinc-200 bg-[#F9F9FB] px-3.5 py-2.5 text-base sm:text-xs text-zinc-900 uppercase placeholder:normal-case placeholder:text-zinc-400 focus:bg-white focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/5 transition-all"
                   />
                   <p className="text-[10px] text-zinc-400">
                     Ingresa los 18 caracteres de tu CURP o tu correo personal.
@@ -840,40 +840,42 @@ export function PortalEmpleado() {
 
         {/* Sección de Incidencias / Solicitud de Vacaciones y Faltas */}
         <Card className="rounded-2xl border-zinc-200/90 shadow-xs">
-          <CardHeader className="pb-2.5 pt-4 px-4 border-b border-zinc-100">
-            <div className="flex items-center justify-between">
+          <CardHeader className="pb-3 pt-4 px-4 sm:px-5 border-b border-zinc-100">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
               <div>
                 <CardTitle className="text-xs font-bold text-zinc-900">
                   Incidencias y Solicitud de Vacaciones
                 </CardTitle>
-                <CardDescription className="text-[10px]">
-                  Envía solicitudes de descanso, permisos o reporta faltas a la administración.
+                <CardDescription className="text-[11px] mt-0.5">
+                  Solicita vacaciones, permisos personales o envía justificantes a administración.
                 </CardDescription>
               </div>
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => setModalIncidencia(true)}
-                className="h-7 text-xs px-2.5 rounded-lg shrink-0"
+                className="min-h-[38px] text-xs px-3 rounded-xl shrink-0 font-semibold self-start sm:self-auto"
               >
                 Nueva Solicitud
               </Button>
             </div>
           </CardHeader>
-          <CardContent className="p-3">
+          <CardContent className="p-3 sm:p-4">
             {incidencias.length === 0 ? (
-              <div className="py-5 text-center text-zinc-400 text-xs">
+              <div className="py-6 text-center text-zinc-400 text-xs">
                 No tienes solicitudes recientes registradas.
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 {incidencias.map((inc) => (
                   <div
                     key={inc.id}
-                    className="p-3 rounded-xl border border-zinc-100 bg-[#F9F9FB] text-xs space-y-1"
+                    className="p-3.5 rounded-2xl border border-zinc-200/70 bg-[#F9F9FB] text-xs space-y-1.5"
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-zinc-900">{inc.tipo}</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-xs text-zinc-900">
+                        {inc.tipo.replace(/_/g, " ")}
+                      </span>
                       <Badge
                         variant={
                           inc.estado === "APROBADA"
@@ -882,30 +884,31 @@ export function PortalEmpleado() {
                             ? "danger"
                             : "warning"
                         }
-                        className="text-[10px]"
+                        className="text-[10px] shrink-0 font-medium"
                       >
                         {inc.estado}
                       </Badge>
                     </div>
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <p className="text-[11px] text-zinc-500">
+                      <p className="text-[11px] text-zinc-600 font-mono font-medium">
                         Del {inc.fecha_inicio} al {inc.fecha_fin}
                       </p>
                       {inc.extemporanea && (
-                        <Badge variant="outline" className="text-[9px] text-amber-600 border-amber-300">
+                        <Badge variant="outline" className="text-[9px] text-amber-600 border-amber-300 bg-amber-50/50">
                           Retroactiva
                         </Badge>
                       )}
                       {inc.documento_path && (
-                        <Badge variant="outline" className="text-[9px] text-blue-600 border-blue-300">
+                        <Badge variant="outline" className="text-[9px] text-blue-600 border-blue-300 bg-blue-50/50">
                           Con Justificante
                         </Badge>
                       )}
                     </div>
-                    <p className="text-[11px] text-zinc-700 italic">&ldquo;{inc.motivo}&rdquo;</p>
+                    <p className="text-[11px] text-zinc-700 italic pt-0.5">&ldquo;{inc.motivo}&rdquo;</p>
                     {inc.respuesta_administrador && (
-                      <div className="text-[10px] text-zinc-600 bg-white p-2 rounded border border-zinc-200 mt-1">
-                        <strong>Respuesta:</strong> {inc.respuesta_administrador}
+                      <div className="text-[10px] text-zinc-700 bg-white p-2.5 rounded-xl border border-zinc-200/90 mt-1.5 space-y-0.5">
+                        <strong className="text-zinc-900">Respuesta del Administrador:</strong>
+                        <p>{inc.respuesta_administrador}</p>
                       </div>
                     )}
                   </div>
@@ -916,184 +919,233 @@ export function PortalEmpleado() {
         </Card>
       </div>
 
-      {/* MODAL SOLICITUD DE INCIDENCIAS */}
+      {/* MODAL SOLICITUD DE INCIDENCIAS (Optimizado Responsive Mobile/Desktop) */}
       {modalIncidencia && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-zinc-950/65 backdrop-blur-xs animate-in fade-in duration-150"
           onClick={(e) => {
             if (e.target === e.currentTarget && !isSendingIncidencia) setModalIncidencia(false);
           }}
         >
           <div
-            className="w-full max-w-sm rounded-2xl bg-white border border-zinc-200 shadow-2xl overflow-hidden"
+            className="w-full max-w-lg max-h-[92dvh] flex flex-col rounded-3xl bg-white border border-zinc-200 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150"
             role="dialog"
             aria-modal="true"
           >
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-100 bg-[#FAFAFC]">
-              <h3 className="text-xs font-bold text-zinc-900">Nueva Solicitud</h3>
+            {/* Encabezado Fijo */}
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-100 bg-[#FAFAFC] shrink-0">
+              <div>
+                <h3 className="text-sm font-bold text-zinc-900">Nueva Solicitud</h3>
+                <p className="text-[11px] text-zinc-500">Completa el formulario para enviar tu solicitud</p>
+              </div>
               <button
                 type="button"
                 onClick={() => setModalIncidencia(false)}
-                className="text-zinc-400 hover:text-zinc-700"
+                className="p-1.5 rounded-xl text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 transition-colors"
+                aria-label="Cerrar ventana"
               >
-                <X className="h-4 w-4" />
+                <X className="h-5 w-5" />
               </button>
             </div>
 
-            <form onSubmit={handleEnviarIncidencia} className="p-5 space-y-3.5 text-xs">
-              <div className="space-y-1">
-                <label className="font-semibold text-zinc-700 block">Tipo de Incidencia</label>
-                <select
-                  value={tipoIncidencia}
-                  onChange={(e) =>
-                    setTipoIncidencia(
-                      e.target.value as
-                        | "VACACIONES"
-                        | "FALTA_JUSTIFICADA"
-                        | "PERMISO"
-                        | "INCAPACIDAD"
-                    )
-                  }
-                  className="w-full rounded-xl border border-zinc-200 bg-[#F9F9FB] px-3 py-2 text-xs text-zinc-900 focus:bg-white focus:border-zinc-900 focus:outline-none"
-                >
-                  <option value="VACACIONES">Solicitud de Vacaciones</option>
-                  <option value="FALTA_JUSTIFICADA">Justificante de Falta</option>
-                  <option value="PERMISO">Permiso Laboral / Asunto Personal</option>
-                  <option value="INCAPACIDAD">Incapacidad Médica (IMSS)</option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <label className="font-semibold text-zinc-700 block">Fecha Inicio</label>
-                    {tipoIncidencia === "INCAPACIDAD" && (
-                      <span className="text-[9px] text-amber-600 font-medium">Retroactivo máx 30d</span>
-                    )}
-                  </div>
-                  <input
-                    type="date"
-                    required
-                    min={minFechaInicio}
-                    value={fechaInicio}
-                    onChange={(e) => {
-                      setFechaInicio(e.target.value);
-                      if (fechaFin && e.target.value > fechaFin) {
-                        setFechaFin(e.target.value);
-                      }
-                    }}
-                    className="w-full rounded-xl border border-zinc-200 bg-[#F9F9FB] px-2.5 py-2 text-xs text-zinc-900 focus:bg-white focus:border-zinc-900 focus:outline-none"
-                  />
+            {/* Formulario con Scroll Táctil */}
+            <form onSubmit={handleEnviarIncidencia} className="flex flex-col flex-1 min-h-0">
+              <div className="flex-1 overflow-y-auto overscroll-contain p-5 space-y-4 text-xs">
+                {/* 1. Tipo de Incidencia */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-zinc-800 block">
+                    Tipo de Solicitud
+                  </label>
+                  <select
+                    value={tipoIncidencia}
+                    onChange={(e) =>
+                      setTipoIncidencia(
+                        e.target.value as
+                          | "VACACIONES"
+                          | "FALTA_JUSTIFICADA"
+                          | "PERMISO"
+                          | "INCAPACIDAD"
+                      )
+                    }
+                    className="w-full min-h-[46px] rounded-xl border border-zinc-200 bg-[#F9F9FB] px-3.5 py-2.5 text-base sm:text-xs text-zinc-900 focus:bg-white focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/5 transition-all cursor-pointer"
+                  >
+                    <option value="VACACIONES">🏖️ Solicitud de Vacaciones</option>
+                    <option value="FALTA_JUSTIFICADA">📄 Justificante de Falta</option>
+                    <option value="PERMISO">⏱️ Permiso Laboral / Asunto Personal</option>
+                    <option value="INCAPACIDAD">🏥 Incapacidad Médica (IMSS)</option>
+                  </select>
                 </div>
-                <div className="space-y-1">
-                  <label className="font-semibold text-zinc-700 block">Fecha Fin</label>
-                  <input
-                    type="date"
-                    required
-                    min={minFechaFin}
-                    value={fechaFin}
-                    onChange={(e) => setFechaFin(e.target.value)}
-                    className="w-full rounded-xl border border-zinc-200 bg-[#F9F9FB] px-2.5 py-2 text-xs text-zinc-900 focus:bg-white focus:border-zinc-900 focus:outline-none"
-                  />
-                </div>
-              </div>
 
-              {/* Justificante médico para Incapacidad o justificación voluntaria */}
-              {(tipoIncidencia === "INCAPACIDAD" || tipoIncidencia === "FALTA_JUSTIFICADA") && (
-                <div className="space-y-2 p-3 rounded-xl border border-blue-100 bg-blue-50/50">
-                  <div className="flex items-center justify-between">
-                    <label className="font-bold text-zinc-900 flex items-center gap-1.5">
-                      <FileText className="h-3.5 w-3.5 text-blue-600" />
-                      <span>Comprobante / Justificante (JPG, PNG, PDF)</span>
-                    </label>
-                    {tipoIncidencia === "INCAPACIDAD" && (
-                      <Badge variant="danger" className="text-[9px]">Obligatorio</Badge>
-                    )}
-                  </div>
+                {/* 2. Selectores de Fechas (En móvil vertical espaciado, en tablet/escritorio 2 columnas) */}
+                <div className="space-y-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
+                    {/* Fecha Inicio */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-semibold text-zinc-800 block">
+                          Fecha Inicio
+                        </label>
+                        {tipoIncidencia === "INCAPACIDAD" && (
+                          <span className="text-[10px] text-amber-700 font-medium bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                            Retroactivo máx 30d
+                          </span>
+                        )}
+                      </div>
+                      <input
+                        type="date"
+                        required
+                        min={minFechaInicio}
+                        value={fechaInicio}
+                        onChange={(e) => {
+                          setFechaInicio(e.target.value);
+                          if (fechaFin && e.target.value > fechaFin) {
+                            setFechaFin(e.target.value);
+                          }
+                        }}
+                        className="w-full min-h-[46px] rounded-xl border border-zinc-200 bg-[#F9F9FB] px-3.5 py-2.5 text-base sm:text-xs text-zinc-900 focus:bg-white focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/5 transition-all font-mono"
+                      />
+                    </div>
 
-                  <input
-                    type="file"
-                    id="justificante-upload"
-                    accept=".jpg,.jpeg,.png,.pdf"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) procesarArchivoAdjunto(file);
-                    }}
-                    className="hidden"
-                  />
-
-                  <div className="flex items-center gap-2">
-                    <label
-                      htmlFor="justificante-upload"
-                      className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-300 bg-white text-zinc-800 text-[11px] font-semibold hover:bg-zinc-50 shadow-2xs"
-                    >
-                      <FileText className="h-3.5 w-3.5" />
-                      {procesandoArchivo ? "Procesando..." : archivoNombre ? "Cambiar archivo" : "Adjuntar archivo"}
-                    </label>
-                    {archivoNombre && (
-                      <span className="text-[10px] text-zinc-600 truncate max-w-[160px]">
-                        {archivoNombre} ({archivoTamanoKb} KB)
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Aviso de Privacidad y Consentimiento de Salud */}
-                  {tipoIncidencia === "INCAPACIDAD" && (
-                    <div className="pt-2 border-t border-blue-100 text-[10px] text-zinc-600 space-y-1.5">
-                      <p className="leading-tight">
-                        <strong>Aviso de Confidencialidad LFT:</strong> Los datos de salud y NSS contenidos en tu justificante médico serán tratados con reserva absoluta y exclusivamente con fines de justificación de inasistencia laboral por Servicio Mecánico López.
-                      </p>
-                      <label className="flex items-start gap-1.5 cursor-pointer font-medium text-zinc-900">
-                        <input
-                          type="checkbox"
-                          required
-                          checked={consentimientoSalud}
-                          onChange={(e) => setConsentimientoSalud(e.target.checked)}
-                          className="mt-0.5 rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span>Autorizo el tratamiento confidencial de mi justificante de salud conforme a la legislación aplicable.</span>
+                    {/* Fecha Fin */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-zinc-800 block">
+                        Fecha Fin
                       </label>
+                      <input
+                        type="date"
+                        required
+                        min={minFechaFin}
+                        value={fechaFin}
+                        onChange={(e) => setFechaFin(e.target.value)}
+                        className="w-full min-h-[46px] rounded-xl border border-zinc-200 bg-[#F9F9FB] px-3.5 py-2.5 text-base sm:text-xs text-zinc-900 focus:bg-white focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/5 transition-all font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Resumen dinámico del rango seleccionado */}
+                  {fechaInicio && fechaFin && fechaFin >= fechaInicio && (
+                    <div className="mt-2 p-2.5 rounded-xl bg-zinc-50 border border-zinc-200/80 flex items-center justify-between text-xs">
+                      <span className="text-zinc-500 font-medium">Duración calculada:</span>
+                      <span className="font-bold text-zinc-900 font-mono">
+                        {(() => {
+                          const d1 = new Date(fechaInicio + "T12:00:00");
+                          const d2 = new Date(fechaFin + "T12:00:00");
+                          const diff = Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                          return `${diff} día${diff === 1 ? "" : "s"} (${fechaInicio} al ${fechaFin})`;
+                        })()}
+                      </span>
                     </div>
                   )}
                 </div>
-              )}
 
-              <div className="space-y-1">
-                <label className="font-semibold text-zinc-700 block">Motivo / Explicación</label>
-                <textarea
-                  required
-                  rows={3}
-                  value={motivo}
-                  onChange={(e) => setMotivo(e.target.value)}
-                  placeholder="Detalla la razón de tu solicitud o justificación..."
-                  className="w-full rounded-xl border border-zinc-200 bg-[#F9F9FB] p-2.5 text-xs text-zinc-900 focus:bg-white focus:border-zinc-900 focus:outline-none"
-                />
+                {/* 3. Justificante médico para Incapacidad o voluntario en Falta */}
+                {(tipoIncidencia === "INCAPACIDAD" || tipoIncidencia === "FALTA_JUSTIFICADA") && (
+                  <div className="space-y-3 p-4 rounded-2xl border border-blue-100 bg-blue-50/60">
+                    <div className="flex items-center justify-between">
+                      <label className="font-bold text-xs text-zinc-900 flex items-center gap-1.5">
+                        <FileText className="h-4 w-4 text-blue-600" />
+                        <span>Comprobante / Justificante</span>
+                      </label>
+                      {tipoIncidencia === "INCAPACIDAD" ? (
+                        <Badge variant="danger" className="text-[10px]">Obligatorio (IMSS)</Badge>
+                      ) : (
+                        <span className="text-[10px] text-zinc-500 font-medium">Opcional</span>
+                      )}
+                    </div>
+
+                    <p className="text-[11px] text-zinc-600 leading-snug">
+                      Sube tu incapacidad oficial del IMSS o receta médica (JPG, PNG o PDF, máx. 5 MB).
+                    </p>
+
+                    <input
+                      type="file"
+                      id="justificante-upload"
+                      accept=".jpg,.jpeg,.png,.pdf"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) procesarArchivoAdjunto(file);
+                      }}
+                      className="hidden"
+                    />
+
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+                      <label
+                        htmlFor="justificante-upload"
+                        className="cursor-pointer min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-blue-200 bg-white text-zinc-800 text-xs font-semibold hover:bg-blue-50/50 shadow-2xs active:bg-blue-100 transition-colors"
+                      >
+                        <FileText className="h-4 w-4 text-blue-600" />
+                        {procesandoArchivo ? "Comprimiendo..." : archivoNombre ? "Cambiar archivo" : "Seleccionar archivo"}
+                      </label>
+                      {archivoNombre && (
+                        <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-white border border-blue-200/80 text-[11px] text-zinc-700">
+                          <span className="truncate max-w-[200px] font-medium">{archivoNombre}</span>
+                          <span className="text-zinc-500 ml-2 font-mono">({archivoTamanoKb} KB)</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Aviso de Privacidad y Consentimiento de Salud LFT */}
+                    {tipoIncidencia === "INCAPACIDAD" && (
+                      <div className="pt-3 border-t border-blue-100 text-[10px] text-zinc-600 space-y-2">
+                        <p className="leading-tight">
+                          <strong>Aviso de Confidencialidad LFT:</strong> Los datos de salud y NSS contenidos en tu justificante médico serán tratados con reserva absoluta y exclusivamente con fines de justificación de inasistencia laboral por Servicio Mecánico López.
+                        </p>
+                        <label className="flex items-start gap-2.5 cursor-pointer font-medium text-xs text-zinc-900 pt-0.5">
+                          <input
+                            type="checkbox"
+                            required
+                            checked={consentimientoSalud}
+                            onChange={(e) => setConsentimientoSalud(e.target.checked)}
+                            className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          />
+                          <span className="text-[11px] leading-snug">
+                            Autorizo el tratamiento confidencial de mi justificante de salud conforme a la legislación laboral aplicable.
+                          </span>
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 4. Motivo / Explicación */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-zinc-800 block">
+                    Motivo / Explicación Detallada
+                  </label>
+                  <textarea
+                    required
+                    rows={3}
+                    value={motivo}
+                    onChange={(e) => setMotivo(e.target.value)}
+                    placeholder="Detalla claramente la razón de tu solicitud o justificación..."
+                    className="w-full min-h-[88px] rounded-xl border border-zinc-200 bg-[#F9F9FB] p-3 text-base sm:text-xs text-zinc-900 focus:bg-white focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/5 transition-all placeholder:text-zinc-400 resize-none"
+                  />
+                </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-100">
+              {/* Botonera Fija */}
+              <div className="grid grid-cols-2 sm:flex sm:items-center sm:justify-end gap-2.5 p-4 sm:px-5 border-t border-zinc-100 bg-[#FAFAFC] shrink-0">
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
                   onClick={() => setModalIncidencia(false)}
                   disabled={isSendingIncidencia}
-                  className="rounded-xl text-xs"
+                  className="min-h-[44px] rounded-xl text-xs font-semibold text-zinc-700"
                 >
                   Cancelar
                 </Button>
                 <Button
                   type="submit"
-                  size="sm"
                   disabled={isSendingIncidencia}
-                  className="rounded-xl text-xs shadow-xs"
+                  className="min-h-[44px] rounded-xl text-xs font-semibold shadow-xs"
                 >
                   {isSendingIncidencia ? (
                     <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                      <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
                       Enviando...
                     </>
                   ) : (
-                    "Enviar a Administrador"
+                    "Enviar Solicitud"
                   )}
                 </Button>
               </div>

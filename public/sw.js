@@ -1,16 +1,24 @@
 // NOLAN by WYLEN - Service Worker Seguro
 // Cumple con la normativa LFT: No almacena en caché marcajes ni datos sensibles.
 
-const CACHE_NAME = "nolan-static-v1";
+const CACHE_NAME = "nolan-static-v2";
 
-// Solo assets estáticos e inmutables del cascarón de la app
+// Solo assets estáticos e inmutables del cascarón de ambas aplicaciones (Admin y Checador)
 const STATIC_ASSETS = [
   "/",
-  "/icons/icon-192.png",
-  "/icons/icon-512.png",
-  "/icons/icon-maskable-512.png",
-  "/icons/apple-touch-icon.png",
   "/isotipo-nolan.png",
+  "/manifest-admin.webmanifest",
+  "/manifest-checador.webmanifest",
+  "/manifest.webmanifest",
+  "/icons/admin-192.png",
+  "/icons/admin-512.png",
+  "/icons/admin-maskable-512.png",
+  "/icons/admin-apple-touch-icon.png",
+  "/icons/checador-192.png",
+  "/icons/checador-512.png",
+  "/icons/checador-maskable-512.png",
+  "/icons/checador-apple-touch-icon.png",
+  "/apple-touch-icon.png",
 ];
 
 // Instalación
@@ -70,6 +78,8 @@ self.addEventListener("fetch", (event) => {
   const isOperationalRoute =
     url.pathname.startsWith("/checador") ||
     url.pathname.startsWith("/asistencias") ||
+    url.pathname.startsWith("/incidencias") ||
+    url.pathname.startsWith("/vacaciones") ||
     url.pathname.startsWith("/reportes") ||
     url.pathname.startsWith("/empleados") ||
     url.pathname.startsWith("/configuracion");
@@ -82,7 +92,7 @@ self.addEventListener("fetch", (event) => {
           if (cached) return cached;
           return new Response(
             JSON.stringify({
-              error: "Sin conexión de red. Se requiere conexión activa para sincronizar asistencias.",
+              error: "Sin conexión de red. Se requiere conexión activa para sincronizar asistencias e incidencias.",
             }),
             {
               status: 503,
@@ -95,11 +105,14 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 4. Assets Estáticos (JS compilado, CSS, Fuentes, Iconos): Stale-While-Revalidate
+  // 4. Assets Estáticos (JS compilado, CSS, Fuentes, Iconos, Manifiestos): Stale-While-Revalidate
   const isStaticAsset =
     url.pathname.startsWith("/_next/static/") ||
     url.pathname.startsWith("/icons/") ||
     url.pathname === "/isotipo-nolan.png" ||
+    url.pathname === "/apple-touch-icon.png" ||
+    url.pathname === "/manifest-admin.webmanifest" ||
+    url.pathname === "/manifest-checador.webmanifest" ||
     url.pathname === "/manifest.webmanifest";
 
   if (isStaticAsset) {
@@ -123,12 +136,25 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 5. Navegación general de páginas HTML: Network-First
+  // 5. Navegación general de páginas HTML: Network-First respetando scope independiente
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request).catch(() => {
         return caches.match(request).then((cached) => {
-          return cached || caches.match("/");
+          if (cached) return cached;
+          if (url.pathname.startsWith("/checador")) {
+            return (
+              caches.match("/checador") ||
+              new Response(
+                "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Sin Conexión | NOLAN Checador</title><style>body{font-family:sans-serif;background:#09090b;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:20px;text-align:center}p{color:#a1a1aa;font-size:14px}</style></head><body><div><h2>Sin Conexión de Red</h2><p>El portal de asistencia requiere conexión activa a internet para verificar la hora legal de Mérida y geocercas GPS.</p></div></body></html>",
+                {
+                  status: 503,
+                  headers: { "Content-Type": "text/html; charset=utf-8" },
+                }
+              )
+            );
+          }
+          return caches.match("/");
         });
       })
     );
