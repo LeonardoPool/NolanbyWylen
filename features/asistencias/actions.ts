@@ -12,6 +12,10 @@ import {
   type JornadaDiariaCalculada,
   type ResumenSemanalLFT,
 } from "@/lib/lft/calculo-horas";
+import {
+  obtenerFechaHoyMerida,
+  sumarDiasAFecha,
+} from "@/lib/utils/fechas-laborales";
 
 export type { ResumenSemanalLFT };
 
@@ -67,8 +71,8 @@ export async function obtenerAsistenciasPeriodo(filtros: {
           activo
         )
       `)
-      .gte("fecha_hora", `${fechaInicio}T00:00:00.000Z`)
-      .lte("fecha_hora", `${fechaFin}T23:59:59.999Z`)
+      .gte("fecha_hora", `${fechaInicio}T06:00:00.000Z`)
+      .lte("fecha_hora", `${sumarDiasAFecha(fechaFin, 1)}T05:59:59.999Z`)
       .order("fecha_hora", { ascending: true });
 
     if (empleadoId && empleadoId !== "todos") {
@@ -112,7 +116,8 @@ export async function obtenerAsistenciasPeriodo(filtros: {
       const emp = raw.empleados;
       if (!emp) continue;
 
-      const fechaDia = raw.fecha_hora.slice(0, 10);
+      // Conversión estricta a fecha calendario America/Merida (UTC-6)
+      const fechaDia = obtenerFechaHoyMerida(raw.fecha_hora);
       const key = `${raw.empleado_id}_${fechaDia}`;
 
       if (!agrupado.has(key)) {

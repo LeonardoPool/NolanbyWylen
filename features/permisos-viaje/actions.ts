@@ -3,6 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  obtenerFechaHoyMerida,
+  calcularDiasEntreFechas,
+  compararFechasCalendario,
+} from "@/lib/utils/fechas-laborales";
 import type { Database, Json } from "@/types/database.types";
 
 export type UbicacionExtraordinariaRow = Database["public"]["Tables"]["ubicaciones_extraordinarias"]["Row"];
@@ -37,7 +42,7 @@ export async function obtenerPermisosExtraordinarios(
   error?: string;
 }> {
   const adminClient = createAdminClient();
-  const hoyStr = new Date().toISOString().slice(0, 10);
+  const hoyStr = obtenerFechaHoyMerida();
 
   try {
     let query = adminClient
@@ -56,13 +61,9 @@ export async function obtenerPermisosExtraordinarios(
       return { permisos: [], error: "No se pudieron consultar los permisos extraordinarios." };
     }
 
-    const hoy = new Date(hoyStr);
-
     const permisosProcesados: PermisoConEmpleado[] = (data ?? []).map((item: any) => {
-      const fechaFin = new Date(item.fecha_fin);
-      const diffTiempo = fechaFin.getTime() - hoy.getTime();
-      const diasRestantes = Math.ceil(diffTiempo / (1000 * 60 * 60 * 24));
-      const estaExpirado = diasRestantes < 0 || !item.activo;
+      const diasRestantes = calcularDiasEntreFechas(hoyStr, item.fecha_fin);
+      const estaExpirado = compararFechasCalendario(item.fecha_fin, hoyStr) < 0 || !item.activo;
 
       return {
         ...item,
@@ -126,7 +127,7 @@ export async function crearPermisoExtraordinario(
   const latitud = parseFloat(String(formData.get("latitud") || ""));
   const longitud = parseFloat(String(formData.get("longitud") || ""));
   const radio_tolerancia_metros = parseInt(String(formData.get("radio_tolerancia_metros") || "200"), 10);
-  const fecha_inicio = String(formData.get("fecha_inicio") || new Date().toISOString().slice(0, 10)).trim();
+  const fecha_inicio = String(formData.get("fecha_inicio") || obtenerFechaHoyMerida()).trim();
   const fecha_fin = String(formData.get("fecha_fin") || "").trim();
 
   if (!empleado_id) return { success: false, error: "Selecciona el empleado comisionado." };
@@ -139,15 +140,12 @@ export async function crearPermisoExtraordinario(
     return { success: false, error: "Debes especificar las fechas de inicio y fin de la vigencia." };
   }
 
-  // Validación de vigencia (de 1 día a 14 días máximo)
-  const inicioDate = new Date(fecha_inicio);
-  const finDate = new Date(fecha_fin);
-
-  if (finDate < inicioDate) {
+  // Validación de vigencia (de 1 día a 14 días máximo) sin desfasamiento UTC
+  if (compararFechasCalendario(fecha_fin, fecha_inicio) < 0) {
     return { success: false, error: "La fecha de fin no puede ser anterior a la fecha de inicio." };
   }
 
-  const diffDias = Math.ceil((finDate.getTime() - inicioDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+  const diffDias = calcularDiasEntreFechas(fecha_inicio, fecha_fin);
 
   if (diffDias > 14) {
     return {

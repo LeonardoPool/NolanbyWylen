@@ -9,6 +9,8 @@ const RUTAS_PROTEGIDAS = [
   "/dashboard",
   "/empleados",
   "/asistencias",
+  "/incidencias",
+  "/vacaciones",
   "/reportes",
   "/configuracion",
 ];

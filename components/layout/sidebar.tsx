@@ -12,6 +12,8 @@ import {
   Radio,
   LogOut,
   Smartphone,
+  ClipboardList,
+  CalendarDays,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { cerrarSesion } from "@/features/auth/actions";
@@ -32,6 +34,16 @@ const navigationItems = [
     name: "Asistencias",
     href: "/asistencias",
     icon: Clock,
+  },
+  {
+    name: "Incidencias",
+    href: "/incidencias",
+    icon: ClipboardList,
+  },
+  {
+    name: "Vacaciones (LFT)",
+    href: "/vacaciones",
+    icon: CalendarDays,
   },
   {
     name: "Reportes",

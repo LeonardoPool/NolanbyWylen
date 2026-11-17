@@ -3,6 +3,8 @@
  * Cumplimiento del Art. 132 fr. XXXIV, Arts. 60, 61, 66, 67 y 68.
  */
 
+import { obtenerMinutosDelDiaMerida } from "../utils/fechas-laborales";
+
 export interface EventoAsistenciaSimple {
   tipoEvento: "ENTRADA" | "INICIO_DESCANSO" | "FIN_DESCANSO" | "SALIDA";
   fechaHora: string; // ISO string
@@ -83,9 +85,8 @@ export function procesarJornadaDiaria(
     };
   }
 
-  // Evaluar retardo
-  const dEntrada = new Date(entrada.fechaHora);
-  const minutosEntrada = dEntrada.getHours() * 60 + dEntrada.getMinutes();
+  // Evaluar retardo en zona horaria America/Merida
+  const minutosEntrada = obtenerMinutosDelDiaMerida(entrada.fechaHora);
   const limiteTolerancia = HORA_ENTRADA_TURNO_DEFAULT + TOLERANCIA_RETARDO_MINUTOS;
   const esRetardo = minutosEntrada > limiteTolerancia;
   const minutosRetardo = esRetardo ? minutosEntrada - HORA_ENTRADA_TURNO_DEFAULT : 0;

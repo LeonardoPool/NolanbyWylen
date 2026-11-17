@@ -22,6 +22,7 @@ const CONFIG_DEFAULT: ConfiguracionTallerRow = {
   latitud: 19.432608,
   longitud: -99.133209,
   radio_tolerancia_metros: 150,
+  dia_descanso_semanal: 0,
   fecha_actualizacion: new Date().toISOString(),
 };
 

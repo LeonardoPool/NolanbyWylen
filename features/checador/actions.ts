@@ -3,6 +3,17 @@
 import crypto from "crypto";
 import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  obtenerFechaHoyMerida,
+  obtenerRangoDiaMeridaEnUtc,
+  compararFechasCalendario,
+  calcularDiasEntreFechas,
+} from "@/lib/utils/fechas-laborales";
+import {
+  IncidenciaFormSchema,
+  validarMagicBytesArchivo,
+  type TipoIncidencia,
+} from "@/lib/validaciones/incidencias.schema";
 import type { Database, Json } from "@/types/database.types";
 
 export type EmpleadoRow = Database["public"]["Tables"]["empleados"]["Row"];
@@ -135,6 +146,7 @@ export async function autenticarEmpleado(
     latitud: 19.432608,
     longitud: -99.133209,
     radio_tolerancia_metros: 150,
+    dia_descanso_semanal: 0,
     fecha_actualizacion: new Date().toISOString(),
   };
 
@@ -213,8 +225,8 @@ export async function autenticarEmpleado(
     // Tolerante
   }
 
-  // 6. Consultar permisos extraordinarios de viaje activos hoy
-  const hoyStr = new Date().toISOString().slice(0, 10);
+  // 6. Consultar permisos extraordinarios de viaje activos hoy en America/Merida
+  const hoyStr = obtenerFechaHoyMerida();
   const { data: permisos } = await adminClient
     .from("ubicaciones_extraordinarias")
     .select("*")
@@ -296,6 +308,7 @@ export async function registrarMarcajeOnline(params: {
     latitud: 19.432608,
     longitud: -99.133209,
     radio_tolerancia_metros: 150,
+    dia_descanso_semanal: 0,
     fecha_actualizacion: new Date().toISOString(),
   };
 
@@ -324,7 +337,7 @@ export async function registrarMarcajeOnline(params: {
 
   // 4. Si está fuera del taller principal, evaluar permisos de viaje activos
   if (!esValido) {
-    const hoyStr = new Date().toISOString().slice(0, 10);
+    const hoyStr = obtenerFechaHoyMerida();
     const { data: permisosViaje } = await adminClient
       .from("ubicaciones_extraordinarias")
       .select("*")
@@ -429,19 +442,20 @@ export async function registrarMarcajeOnline(params: {
 }
 
 /**
- * Consulta los marcajes del día actual para un empleado.
+ * Consulta los marcajes del día actual para un empleado en America/Merida.
  */
 export async function obtenerMarcajesDelDia(
   empleadoId: string
 ): Promise<AsistenciaRow[]> {
   const adminClient = createAdminClient();
-  const hoy = new Date().toISOString().slice(0, 10);
+  const { inicioUtc, finUtc } = obtenerRangoDiaMeridaEnUtc();
 
   const { data, error } = await adminClient
     .from("asistencias")
     .select("*")
     .eq("empleado_id", empleadoId)
-    .gte("fecha_hora", `${hoy}T00:00:00.000Z`)
+    .gte("fecha_hora", inicioUtc)
+    .lte("fecha_hora", finUtc)
     .order("fecha_hora", { ascending: false });
 
   if (error || !data) return [];
@@ -450,36 +464,148 @@ export async function obtenerMarcajesDelDia(
 
 /**
  * Solicita una incidencia (vacaciones, falta justificada, permiso, incapacidad).
+ * Aplica validaciones estrictas de zona horaria (America/Merida), bloqueo de fechas pasadas,
+ * soporte de retroactividad justificada para incapacidades médicas del IMSS (hasta 30 días)
+ * y almacenamiento seguro inmutable de comprobantes en Supabase Storage sin OCR/IA externa.
  */
 export async function registrarIncidencia(params: {
   empleadoId: string;
-  tipo: "FALTA_JUSTIFICADA" | "VACACIONES" | "PERMISO" | "INCAPACIDAD";
+  tipo: TipoIncidencia;
   fechaInicio: string;
   fechaFin: string;
   motivo: string;
+  archivoBase64?: string;
+  archivoNombre?: string;
+  consentimientoSalud?: boolean;
 }): Promise<{
   success: boolean;
   message?: string;
   error?: string;
   incidencia?: IncidenciaRow;
 }> {
-  const { empleadoId, tipo, fechaInicio, fechaFin, motivo } = params;
+  // 1. Validación de esquema con Zod
+  const validacion = IncidenciaFormSchema.safeParse({
+    empleadoId: params.empleadoId,
+    tipo: params.tipo,
+    fechaInicio: params.fechaInicio,
+    fechaFin: params.fechaFin,
+    motivo: params.motivo,
+    consentimientoSalud: params.consentimientoSalud,
+  });
 
-  if (!empleadoId || !tipo || !fechaInicio || !fechaFin || !motivo.trim()) {
-    return { success: false, error: "Todos los campos de la solicitud son obligatorios." };
+  if (!validacion.success) {
+    const errorMsg = validacion.error.issues[0]?.message || "Datos de solicitud inválidos.";
+    return { success: false, error: errorMsg };
   }
 
   const adminClient = createAdminClient();
+  const hoyMerida = obtenerFechaHoyMerida();
+  const esExtemporanea = compararFechasCalendario(params.fechaInicio, hoyMerida) < 0;
 
+  // 2. Reglas específicas para justificantes de salud
+  if (params.tipo === "INCAPACIDAD") {
+    if (!params.archivoBase64) {
+      return {
+        success: false,
+        error: "Para solicitar incapacidad médica del IMSS es obligatorio adjuntar el documento justificante (JPG, PNG o PDF).",
+      };
+    }
+    if (!params.consentimientoSalud) {
+      return {
+        success: false,
+        error: "Debes autorizar el consentimiento para el tratamiento confidencial de tu documento de salud.",
+      };
+    }
+  }
+
+  // 3. Procesamiento y subida segura del justificante a Storage privado
+  let documentoPath: string | null = null;
+  let documentoNombreOriginal: string | null = null;
+  let documentoHash: string | null = null;
+  let documentoBytes: number | null = null;
+  let documentoMime: string | null = null;
+  let documentoEstado: "SIN_DOCUMENTO" | "PENDIENTE_REVISION" = "SIN_DOCUMENTO";
+
+  if (params.archivoBase64) {
+    const base64Limpio = params.archivoBase64.replace(/^data:[^;]+;base64,/, "");
+    const buffer = Buffer.from(base64Limpio, "base64");
+    documentoBytes = buffer.length;
+
+    // Validación de tamaño máximo (5 MB)
+    if (documentoBytes > 5 * 1024 * 1024) {
+      return {
+        success: false,
+        error: "El archivo adjunto excede el tamaño máximo permitido de 5 MB.",
+      };
+    }
+
+    // Validación rigurosa de magic bytes
+    const checkMagic = validarMagicBytesArchivo(buffer);
+    if (!checkMagic.valido || !checkMagic.mimeDetectado || !checkMagic.extensionSugerida) {
+      return {
+        success: false,
+        error: checkMagic.error || "Formato de archivo no admitido.",
+      };
+    }
+
+    documentoMime = checkMagic.mimeDetectado;
+    documentoNombreOriginal = params.archivoNombre?.slice(0, 150) || `justificante.${checkMagic.extensionSugerida}`;
+    documentoHash = crypto.createHash("sha256").update(buffer).digest("hex");
+    documentoPath = `${params.empleadoId}/${crypto.randomUUID()}.${checkMagic.extensionSugerida}`;
+    documentoEstado = "PENDIENTE_REVISION";
+
+    const { error: uploadError } = await adminClient.storage
+      .from("justificantes-medicos")
+      .upload(documentoPath, buffer, {
+        contentType: checkMagic.mimeDetectado,
+        upsert: false,
+      });
+
+    if (uploadError) {
+      return {
+        success: false,
+        error: "No se pudo almacenar el documento médico de forma segura. Intenta de nuevo.",
+      };
+    }
+  }
+
+  // 4. Cálculo de días solicitados efectivos (Art. 74 y descanso semanal)
+  let diasEfectivos = calcularDiasEntreFechas(params.fechaInicio, params.fechaFin);
+  if (params.tipo === "VACACIONES") {
+    try {
+      const { data: diasHabiles, error: rpcErr } = await adminClient.rpc("dias_habiles_vacaciones", {
+        fecha_inicio: params.fechaInicio,
+        fecha_fin: params.fechaFin,
+      });
+      if (!rpcErr && typeof diasHabiles === "number") {
+        diasEfectivos = diasHabiles;
+      }
+    } catch {
+      // tolerante si la función de vacaciones aún no está compilada
+    }
+  }
+
+  // 5. Inserción protegida en la base de datos
+  const ahora = new Date().toISOString();
   const { data, error } = await adminClient
     .from("incidencias_empleado")
     .insert({
-      empleado_id: empleadoId,
-      tipo,
-      fecha_inicio: fechaInicio,
-      fecha_fin: fechaFin,
-      motivo: motivo.trim(),
+      empleado_id: params.empleadoId,
+      tipo: params.tipo,
+      fecha_inicio: params.fechaInicio,
+      fecha_fin: params.fechaFin,
+      motivo: params.motivo.trim(),
       estado: "PENDIENTE",
+      extemporanea: esExtemporanea,
+      dias_solicitados_efectivos: diasEfectivos,
+      documento_path: documentoPath,
+      documento_nombre_original: documentoNombreOriginal,
+      documento_hash_sha256: documentoHash,
+      documento_tamano_bytes: documentoBytes,
+      documento_mime: documentoMime,
+      documento_estado: documentoEstado,
+      consentimiento_salud_aceptado: Boolean(params.consentimientoSalud),
+      consentimiento_salud_fecha: params.consentimientoSalud ? ahora : null,
     })
     .select("*")
     .single();
@@ -490,7 +616,9 @@ export async function registrarIncidencia(params: {
 
   return {
     success: true,
-    message: "Tu solicitud fue enviada a la administración para su revisión.",
+    message: esExtemporanea
+      ? "Tu solicitud de incapacidad retroactiva fue registrada con éxito y enviada a revisión administrativa."
+      : "Tu solicitud fue enviada a la administración para su revisión.",
     incidencia: data,
   };
 }

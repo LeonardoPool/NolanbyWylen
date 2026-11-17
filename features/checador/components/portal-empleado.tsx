@@ -83,7 +83,104 @@ export function PortalEmpleado() {
   const [fechaInicio, setFechaInicio] = useState("");
   const [fechaFin, setFechaFin] = useState("");
   const [motivo, setMotivo] = useState("");
+  const [archivoBase64, setArchivoBase64] = useState<string | null>(null);
+  const [archivoNombre, setArchivoNombre] = useState<string | null>(null);
+  const [archivoTamanoKb, setArchivoTamanoKb] = useState<number | null>(null);
+  const [consentimientoSalud, setConsentimientoSalud] = useState(false);
+  const [procesandoArchivo, setProcesandoArchivo] = useState(false);
   const [isSendingIncidencia, startIncidenciaTransition] = useTransition();
+
+  // Fecha actual en America/Merida para restringir selectores
+  const hoyMerida = React.useMemo(() => {
+    try {
+      const formateador = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Merida",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+      return formateador.format(new Date());
+    } catch {
+      return new Date().toISOString().slice(0, 10);
+    }
+  }, []);
+
+  const minFechaInicio = React.useMemo(() => {
+    if (tipoIncidencia === "INCAPACIDAD") {
+      const [y, m, d] = hoyMerida.split("-").map(Number);
+      const retro = new Date(Date.UTC(y, m - 1, d - 30));
+      return retro.toISOString().slice(0, 10);
+    }
+    return hoyMerida;
+  }, [tipoIncidencia, hoyMerida]);
+
+  const minFechaFin = fechaInicio || minFechaInicio;
+
+  // Compresión en cliente con Canvas (Ahorro de espacio gratuito)
+  async function procesarArchivoAdjunto(file: File) {
+    if (file.size > 5 * 1024 * 1024) {
+      notify.error("Archivo demasiado grande", "El límite máximo permitido es de 5 MB.");
+      return;
+    }
+
+    setProcesandoArchivo(true);
+    try {
+      if (file.type.startsWith("image/")) {
+        const img = document.createElement("img");
+        const url = URL.createObjectURL(file);
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = url;
+        });
+
+        const maxDim = 1600;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        const mimeType = file.type === "image/png" ? "image/png" : "image/jpeg";
+        const base64 = canvas.toDataURL(mimeType, 0.82);
+        URL.revokeObjectURL(url);
+
+        setArchivoBase64(base64);
+        setArchivoNombre(file.name);
+        setArchivoTamanoKb(Math.round((base64.length * 0.75) / 1024));
+        notify.success("Documento adjuntado", `${file.name} comprimido con éxito.`);
+      } else if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          setArchivoBase64(result);
+          setArchivoNombre(file.name);
+          setArchivoTamanoKb(Math.round(file.size / 1024));
+          notify.success("Documento adjuntado", `${file.name} listo para enviar.`);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        notify.error("Formato no admitido", "Solo se aceptan archivos en formato JPG, PNG o PDF.");
+      }
+    } catch {
+      notify.error("Error al leer archivo", "No se pudo procesar el archivo seleccionado.");
+    } finally {
+      setProcesandoArchivo(false);
+    }
+  }
 
   // Modal Verificación Facial (LFT Identidad Inequívoca)
   const [modalCamara, setModalCamara] = useState(false);
@@ -367,6 +464,16 @@ export function PortalEmpleado() {
     e.preventDefault();
     if (!empleado) return;
 
+    if (tipoIncidencia === "INCAPACIDAD" && !archivoBase64) {
+      notify.error("Comprobante obligatorio", "Debes adjuntar tu justificante médico del IMSS.");
+      return;
+    }
+
+    if (tipoIncidencia === "INCAPACIDAD" && !consentimientoSalud) {
+      notify.error("Aviso de consentimiento", "Debes aceptar la casilla de tratamiento de datos de salud.");
+      return;
+    }
+
     startIncidenciaTransition(async () => {
       const res = await registrarIncidencia({
         empleadoId: empleado.id,
@@ -374,6 +481,9 @@ export function PortalEmpleado() {
         fechaInicio,
         fechaFin,
         motivo,
+        archivoBase64: archivoBase64 || undefined,
+        archivoNombre: archivoNombre || undefined,
+        consentimientoSalud,
       });
 
       if (!res.success) {
@@ -386,6 +496,10 @@ export function PortalEmpleado() {
       setMotivo("");
       setFechaInicio("");
       setFechaFin("");
+      setArchivoBase64(null);
+      setArchivoNombre(null);
+      setArchivoTamanoKb(null);
+      setConsentimientoSalud(false);
 
       const list = await obtenerIncidenciasEmpleado(empleado.id);
       setIncidencias(list);
@@ -770,9 +884,21 @@ export function PortalEmpleado() {
                         {inc.estado}
                       </Badge>
                     </div>
-                    <p className="text-[11px] text-zinc-500">
-                      Del {inc.fecha_inicio} al {inc.fecha_fin}
-                    </p>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="text-[11px] text-zinc-500">
+                        Del {inc.fecha_inicio} al {inc.fecha_fin}
+                      </p>
+                      {inc.extemporanea && (
+                        <Badge variant="outline" className="text-[9px] text-amber-600 border-amber-300">
+                          Retroactiva
+                        </Badge>
+                      )}
+                      {inc.documento_path && (
+                        <Badge variant="outline" className="text-[9px] text-blue-600 border-blue-300">
+                          Con Justificante
+                        </Badge>
+                      )}
+                    </div>
                     <p className="text-[11px] text-zinc-700 italic">&ldquo;{inc.motivo}&rdquo;</p>
                     {inc.respuesta_administrador && (
                       <div className="text-[10px] text-zinc-600 bg-white p-2 rounded border border-zinc-200 mt-1">
@@ -836,12 +962,23 @@ export function PortalEmpleado() {
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
-                  <label className="font-semibold text-zinc-700 block">Fecha Inicio</label>
+                  <div className="flex items-center justify-between">
+                    <label className="font-semibold text-zinc-700 block">Fecha Inicio</label>
+                    {tipoIncidencia === "INCAPACIDAD" && (
+                      <span className="text-[9px] text-amber-600 font-medium">Retroactivo máx 30d</span>
+                    )}
+                  </div>
                   <input
                     type="date"
                     required
+                    min={minFechaInicio}
                     value={fechaInicio}
-                    onChange={(e) => setFechaInicio(e.target.value)}
+                    onChange={(e) => {
+                      setFechaInicio(e.target.value);
+                      if (fechaFin && e.target.value > fechaFin) {
+                        setFechaFin(e.target.value);
+                      }
+                    }}
                     className="w-full rounded-xl border border-zinc-200 bg-[#F9F9FB] px-2.5 py-2 text-xs text-zinc-900 focus:bg-white focus:border-zinc-900 focus:outline-none"
                   />
                 </div>
@@ -850,12 +987,73 @@ export function PortalEmpleado() {
                   <input
                     type="date"
                     required
+                    min={minFechaFin}
                     value={fechaFin}
                     onChange={(e) => setFechaFin(e.target.value)}
                     className="w-full rounded-xl border border-zinc-200 bg-[#F9F9FB] px-2.5 py-2 text-xs text-zinc-900 focus:bg-white focus:border-zinc-900 focus:outline-none"
                   />
                 </div>
               </div>
+
+              {/* Justificante médico para Incapacidad o justificación voluntaria */}
+              {(tipoIncidencia === "INCAPACIDAD" || tipoIncidencia === "FALTA_JUSTIFICADA") && (
+                <div className="space-y-2 p-3 rounded-xl border border-blue-100 bg-blue-50/50">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-zinc-900 flex items-center gap-1.5">
+                      <FileText className="h-3.5 w-3.5 text-blue-600" />
+                      <span>Comprobante / Justificante (JPG, PNG, PDF)</span>
+                    </label>
+                    {tipoIncidencia === "INCAPACIDAD" && (
+                      <Badge variant="danger" className="text-[9px]">Obligatorio</Badge>
+                    )}
+                  </div>
+
+                  <input
+                    type="file"
+                    id="justificante-upload"
+                    accept=".jpg,.jpeg,.png,.pdf"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) procesarArchivoAdjunto(file);
+                    }}
+                    className="hidden"
+                  />
+
+                  <div className="flex items-center gap-2">
+                    <label
+                      htmlFor="justificante-upload"
+                      className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-300 bg-white text-zinc-800 text-[11px] font-semibold hover:bg-zinc-50 shadow-2xs"
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                      {procesandoArchivo ? "Procesando..." : archivoNombre ? "Cambiar archivo" : "Adjuntar archivo"}
+                    </label>
+                    {archivoNombre && (
+                      <span className="text-[10px] text-zinc-600 truncate max-w-[160px]">
+                        {archivoNombre} ({archivoTamanoKb} KB)
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Aviso de Privacidad y Consentimiento de Salud */}
+                  {tipoIncidencia === "INCAPACIDAD" && (
+                    <div className="pt-2 border-t border-blue-100 text-[10px] text-zinc-600 space-y-1.5">
+                      <p className="leading-tight">
+                        <strong>Aviso de Confidencialidad LFT:</strong> Los datos de salud y NSS contenidos en tu justificante médico serán tratados con reserva absoluta y exclusivamente con fines de justificación de inasistencia laboral por Servicio Mecánico López.
+                      </p>
+                      <label className="flex items-start gap-1.5 cursor-pointer font-medium text-zinc-900">
+                        <input
+                          type="checkbox"
+                          required
+                          checked={consentimientoSalud}
+                          onChange={(e) => setConsentimientoSalud(e.target.checked)}
+                          className="mt-0.5 rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span>Autorizo el tratamiento confidencial de mi justificante de salud conforme a la legislación aplicable.</span>
+                      </label>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-1">
                 <label className="font-semibold text-zinc-700 block">Motivo / Explicación</label>

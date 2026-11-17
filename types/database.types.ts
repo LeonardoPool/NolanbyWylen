@@ -225,6 +225,7 @@ export interface Database {
           latitud: number;
           longitud: number;
           radio_tolerancia_metros: number;
+          dia_descanso_semanal: number;
           fecha_actualizacion: string;
         };
         Insert: {
@@ -235,6 +236,7 @@ export interface Database {
           latitud?: number;
           longitud?: number;
           radio_tolerancia_metros?: number;
+          dia_descanso_semanal?: number;
           fecha_actualizacion?: string;
         };
         Update: {
@@ -245,6 +247,7 @@ export interface Database {
           latitud?: number;
           longitud?: number;
           radio_tolerancia_metros?: number;
+          dia_descanso_semanal?: number;
           fecha_actualizacion?: string;
         };
         Relationships: [];
@@ -262,6 +265,19 @@ export interface Database {
           perfil_revisor_id: string | null;
           fecha_creacion: string;
           fecha_resolucion: string | null;
+          extemporanea: boolean;
+          dias_solicitados_efectivos: number;
+          documento_path: string | null;
+          documento_nombre_original: string | null;
+          documento_hash_sha256: string | null;
+          documento_tamano_bytes: number | null;
+          documento_mime: string | null;
+          documento_estado: "SIN_DOCUMENTO" | "PENDIENTE_REVISION" | "ACEPTADO" | "RECHAZADO";
+          documento_revisado_por: string | null;
+          documento_revisado_en: string | null;
+          documento_comentario: string | null;
+          consentimiento_salud_aceptado: boolean;
+          consentimiento_salud_fecha: string | null;
         };
         Insert: {
           id?: string;
@@ -275,6 +291,19 @@ export interface Database {
           perfil_revisor_id?: string | null;
           fecha_creacion?: string;
           fecha_resolucion?: string | null;
+          extemporanea?: boolean;
+          dias_solicitados_efectivos?: number;
+          documento_path?: string | null;
+          documento_nombre_original?: string | null;
+          documento_hash_sha256?: string | null;
+          documento_tamano_bytes?: number | null;
+          documento_mime?: string | null;
+          documento_estado?: "SIN_DOCUMENTO" | "PENDIENTE_REVISION" | "ACEPTADO" | "RECHAZADO";
+          documento_revisado_por?: string | null;
+          documento_revisado_en?: string | null;
+          documento_comentario?: string | null;
+          consentimiento_salud_aceptado?: boolean;
+          consentimiento_salud_fecha?: string | null;
         };
         Update: {
           id?: string;
@@ -288,6 +317,19 @@ export interface Database {
           perfil_revisor_id?: string | null;
           fecha_creacion?: string;
           fecha_resolucion?: string | null;
+          extemporanea?: boolean;
+          dias_solicitados_efectivos?: number;
+          documento_path?: string | null;
+          documento_nombre_original?: string | null;
+          documento_hash_sha256?: string | null;
+          documento_tamano_bytes?: number | null;
+          documento_mime?: string | null;
+          documento_estado?: "SIN_DOCUMENTO" | "PENDIENTE_REVISION" | "ACEPTADO" | "RECHAZADO";
+          documento_revisado_por?: string | null;
+          documento_revisado_en?: string | null;
+          documento_comentario?: string | null;
+          consentimiento_salud_aceptado?: boolean;
+          consentimiento_salud_fecha?: string | null;
         };
         Relationships: [];
       };
@@ -363,6 +405,87 @@ export interface Database {
         };
         Relationships: [];
       };
+      politicas_vacaciones: {
+        Row: {
+          id: string;
+          anio_servicio_desde: number;
+          anio_servicio_hasta: number;
+          dias_vacaciones: number;
+          vigente_desde: string;
+          vigente_hasta: string | null;
+          activo: boolean;
+        };
+        Insert: {
+          id?: string;
+          anio_servicio_desde: number;
+          anio_servicio_hasta: number;
+          dias_vacaciones: number;
+          vigente_desde?: string;
+          vigente_hasta?: string | null;
+          activo?: boolean;
+        };
+        Update: {
+          id?: string;
+          anio_servicio_desde?: number;
+          anio_servicio_hasta?: number;
+          dias_vacaciones?: number;
+          vigente_desde?: string;
+          vigente_hasta?: string | null;
+          activo?: boolean;
+        };
+        Relationships: [];
+      };
+      dias_festivos_oficiales: {
+        Row: {
+          id: string;
+          fecha: string;
+          descripcion: string;
+          irrenunciable: boolean;
+        };
+        Insert: {
+          id?: string;
+          fecha: string;
+          descripcion: string;
+          irrenunciable?: boolean;
+        };
+        Update: {
+          id?: string;
+          fecha?: string;
+          descripcion?: string;
+          irrenunciable?: boolean;
+        };
+        Relationships: [];
+      };
+      ajustes_vacaciones: {
+        Row: {
+          id: string;
+          empleado_id: string;
+          tipo: "CARGA_HISTORICA" | "AJUSTE_POSITIVO" | "AJUSTE_NEGATIVO";
+          dias: number;
+          motivo: string;
+          autor_perfil_id: string | null;
+          fecha_creacion: string;
+        };
+        Insert: {
+          id?: string;
+          empleado_id: string;
+          tipo: "CARGA_HISTORICA" | "AJUSTE_POSITIVO" | "AJUSTE_NEGATIVO";
+          dias: number;
+          motivo: string;
+          autor_perfil_id?: string | null;
+          fecha_creacion?: string;
+        };
+        Update: {
+          id?: string;
+          empleado_id?: string;
+          tipo?: "CARGA_HISTORICA" | "AJUSTE_POSITIVO" | "AJUSTE_NEGATIVO";
+          dias?: number;
+          motivo?: string;
+          autor_perfil_id?: string | null;
+          fecha_creacion?: string;
+        };
+        Relationships: [];
+      };
       registros_auditoria: {
         Row: {
           id: string;
@@ -405,6 +528,13 @@ export interface Database {
       es_administrador: {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
+      };
+      dias_habiles_vacaciones: {
+        Args: {
+          fecha_inicio: string;
+          fecha_fin: string;
+        };
+        Returns: number;
       };
     };
     Enums: Record<string, never>;
