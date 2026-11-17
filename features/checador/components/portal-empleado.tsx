@@ -91,7 +91,9 @@ export function PortalEmpleado() {
   const [isSendingIncidencia, startIncidenciaTransition] = useTransition();
 
   // Fecha actual en America/Merida para restringir selectores
-  const hoyMerida = React.useMemo(() => {
+  const [hoyMerida, setHoyMerida] = useState("");
+
+  useEffect(() => {
     try {
       const formateador = new Intl.DateTimeFormat("en-CA", {
         timeZone: "America/Merida",
@@ -99,13 +101,14 @@ export function PortalEmpleado() {
         month: "2-digit",
         day: "2-digit",
       });
-      return formateador.format(new Date());
+      setHoyMerida(formateador.format(new Date()));
     } catch {
-      return new Date().toISOString().slice(0, 10);
+      setHoyMerida(new Date().toISOString().slice(0, 10));
     }
   }, []);
 
   const minFechaInicio = React.useMemo(() => {
+    if (!hoyMerida) return undefined;
     if (tipoIncidencia === "INCAPACIDAD") {
       const [y, m, d] = hoyMerida.split("-").map(Number);
       const retro = new Date(Date.UTC(y, m - 1, d - 30));
