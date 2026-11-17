@@ -1,6 +1,7 @@
 "use server";
 
 import crypto from "crypto";
+import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database, Json } from "@/types/database.types";
 
@@ -40,7 +41,24 @@ export async function calcularDistanciaMetros(
 }
 
 /**
+ * Obtiene la dirección IP del cliente desde los encabezados de la petición de forma segura.
+ */
+async function obtenerIpCliente(): Promise<string> {
+  try {
+    const h = await headers();
+    return (
+      h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      h.get("x-real-ip")?.trim() ||
+      "127.0.0.1"
+    );
+  } catch {
+    return "127.0.0.1";
+  }
+}
+
+/**
  * Autentica al empleado con su CURP o Correo + PIN de 4 dígitos.
+ * Incluye mitigación contra fuerza bruta en base de datos (límite de 5 intentos fallidos en 15 min).
  */
 export async function autenticarEmpleado(
   identificador: string,
@@ -60,8 +78,49 @@ export async function autenticarEmpleado(
   }
 
   const adminClient = createAdminClient();
+  const ipOrigen = await obtenerIpCliente();
+  const idNormalizado = idLimpio.toUpperCase();
 
-  // 1. Verificar configuración del taller
+  // 1. Mitigación contra fuerza bruta: verificar intentos fallidos en los últimos 15 minutos
+  const ventanaMinutos = 15;
+  const fechaLimite = new Date(Date.now() - ventanaMinutos * 60 * 1000).toISOString();
+  let intentosFallidosPrevios = 0;
+
+  try {
+    const { count, error: countError } = await adminClient
+      .from("intentos_acceso_pin")
+      .select("*", { count: "exact", head: true })
+      .or(`identificador.eq.${idNormalizado},ip_origen.eq.${ipOrigen}`)
+      .eq("exitoso", false)
+      .gte("fecha_intento", fechaLimite);
+
+    if (!countError && typeof count === "number") {
+      intentosFallidosPrevios = count;
+      if (intentosFallidosPrevios >= 5) {
+        return {
+          success: false,
+          error: "Demasiados intentos fallidos. Tu acceso ha sido bloqueado temporalmente por 15 minutos para proteger tu cuenta.",
+        };
+      }
+    }
+  } catch {
+    // Tolerante si la migración aún está en proceso de ejecución
+  }
+
+  // 2. Función auxiliar interna para registrar intento fallido
+  const registrarFallo = async () => {
+    try {
+      await adminClient.from("intentos_acceso_pin").insert({
+        identificador: idNormalizado,
+        ip_origen: ipOrigen,
+        exitoso: false,
+      });
+    } catch {
+      // Tolerante
+    }
+  };
+
+  // 3. Verificar configuración del taller
   const { data: config } = await adminClient
     .from("configuracion_taller")
     .select("*")
@@ -86,22 +145,26 @@ export async function autenticarEmpleado(
     };
   }
 
-  // 2. Buscar al empleado por CURP o Correo
+  // 4. Buscar al empleado por CURP o Correo
   const esCorreo = idLimpio.includes("@");
   let query = adminClient.from("empleados").select("*");
 
   if (esCorreo) {
     query = query.ilike("correo", idLimpio);
   } else {
-    query = query.eq("curp", idLimpio.toUpperCase());
+    query = query.eq("curp", idNormalizado);
   }
 
   const { data: empleados, error } = await query.limit(1);
 
   if (error || !empleados || empleados.length === 0) {
+    await registrarFallo();
+    const restantes = Math.max(0, 5 - intentosFallidosPrevios - 1);
     return {
       success: false,
-      error: "No se encontró ningún empleado registrado con ese CURP o correo.",
+      error: `No se encontró ningún empleado registrado con ese CURP o correo.${
+        restantes <= 2 ? ` (Intentos restantes: ${restantes})` : ""
+      }`,
     };
   }
 
@@ -129,13 +192,28 @@ export async function autenticarEmpleado(
   }
 
   if (emp.pin !== pinLimpio) {
+    await registrarFallo();
+    const restantes = Math.max(0, 5 - intentosFallidosPrevios - 1);
     return {
       success: false,
-      error: "El PIN de 4 dígitos ingresado es incorrecto.",
+      error: `El PIN de 4 dígitos ingresado es incorrecto.${
+        restantes <= 3 ? ` (Intentos restantes: ${restantes})` : ""
+      }`,
     };
   }
 
-  // 3. Consultar permisos extraordinarios de viaje activos hoy
+  // 5. Autenticación exitosa: registrar intento exitoso
+  try {
+    await adminClient.from("intentos_acceso_pin").insert({
+      identificador: idNormalizado,
+      ip_origen: ipOrigen,
+      exitoso: true,
+    });
+  } catch {
+    // Tolerante
+  }
+
+  // 6. Consultar permisos extraordinarios de viaje activos hoy
   const hoyStr = new Date().toISOString().slice(0, 10);
   const { data: permisos } = await adminClient
     .from("ubicaciones_extraordinarias")

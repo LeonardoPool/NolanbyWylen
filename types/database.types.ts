@@ -339,6 +339,30 @@ export interface Database {
         };
         Relationships: [];
       };
+      intentos_acceso_pin: {
+        Row: {
+          id: string;
+          identificador: string;
+          ip_origen: string;
+          exitoso: boolean;
+          fecha_intento: string;
+        };
+        Insert: {
+          id?: string;
+          identificador: string;
+          ip_origen?: string;
+          exitoso?: boolean;
+          fecha_intento?: string;
+        };
+        Update: {
+          id?: string;
+          identificador?: string;
+          ip_origen?: string;
+          exitoso?: boolean;
+          fecha_intento?: string;
+        };
+        Relationships: [];
+      };
       registros_auditoria: {
         Row: {
           id: string;
