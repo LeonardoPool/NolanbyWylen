@@ -167,28 +167,12 @@ export async function obtenerFichasVacacionalesAdmin(): Promise<{
   error?: string;
 }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return { fichas: [], error: "Sesión no válida o expirada." };
-  }
-
-  const { data: perfil } = await supabase
-    .from("perfiles")
-    .select("rol, activo")
-    .eq("id", user.id)
-    .single();
-
-  if (!perfil?.activo || perfil.rol !== "ADMINISTRADOR") {
-    return { fichas: [], error: "Acceso exclusivo para administradores." };
-  }
-
   const adminClient = createAdminClient();
 
-  // Consulta en paralelo de empleados, ajustes de saldo e incidencias de vacaciones
-  const [empleadosRes, ajustesRes, incidenciasRes] = await Promise.all([
+  // Ejecutar autenticación, verificación de perfil y consultas de datos en 1 sola tanda paralela (1 round-trip)
+  const [authRes, perfilesRes, empleadosRes, ajustesRes, incidenciasRes] = await Promise.all([
+    supabase.auth.getUser(),
+    adminClient.from("perfiles").select("id, rol, activo").eq("activo", true),
     adminClient
       .from("empleados")
       .select("id, nombre, apellidos, numero_empleado, puesto, fecha_ingreso")
@@ -203,6 +187,16 @@ export async function obtenerFichasVacacionalesAdmin(): Promise<{
       .select("empleado_id, dias_solicitados_efectivos, estado")
       .eq("tipo", "VACACIONES"),
   ]);
+
+  const user = authRes.data?.user;
+  if (!user) {
+    return { fichas: [], error: "Sesión no válida o expirada." };
+  }
+
+  const perfil = (perfilesRes.data || []).find((p) => p.id === user.id);
+  if (!perfil?.activo || perfil.rol !== "ADMINISTRADOR") {
+    return { fichas: [], error: "Acceso exclusivo para administradores." };
+  }
 
   if (empleadosRes.error || !empleadosRes.data) {
     return { fichas: [], error: "No se pudo consultar el catálogo de empleados." };

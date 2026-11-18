@@ -267,8 +267,8 @@ export function PermisoViajeDialog({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
+              <div className="space-y-1 min-w-0">
                 <label htmlFor="fecha_inicio" className="text-[11px] font-medium text-zinc-600">
                   Fecha de Inicio
                 </label>
@@ -279,11 +279,11 @@ export function PermisoViajeDialog({
                   value={fechaInicio}
                   onChange={(e) => setFechaInicio(e.target.value)}
                   disabled={isPending}
-                  className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-900"
+                  className="w-full min-w-0 rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-900"
                 />
               </div>
 
-              <div className="space-y-1">
+              <div className="space-y-1 min-w-0">
                 <label htmlFor="fecha_fin" className="text-[11px] font-medium text-zinc-600">
                   Fecha de Caducidad (Fin)
                 </label>
@@ -294,7 +294,7 @@ export function PermisoViajeDialog({
                   value={fechaFin}
                   onChange={(e) => setFechaFin(e.target.value)}
                   disabled={isPending}
-                  className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-900"
+                  className="w-full min-w-0 rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-900"
                 />
               </div>
             </div>

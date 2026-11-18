@@ -348,21 +348,20 @@ export function ReportesVista({
             </div>
 
             {/* Fechas personalizadas */}
-            <div className="space-y-1">
+            <div className="space-y-1 min-w-0">
               <label className="text-xs font-semibold text-zinc-700 block">Fechas Específicas</label>
-              <div className="flex items-center gap-1.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 min-w-0">
                 <input
                   type="date"
                   value={fechaInicio}
                   onChange={(e) => setFechaInicio(e.target.value)}
-                  className="w-full rounded-xl border border-zinc-200 bg-white p-2 text-xs text-zinc-900 focus:outline-none"
+                  className="w-full min-w-0 rounded-xl border border-zinc-200 bg-white p-2 text-xs text-zinc-900 focus:outline-none"
                 />
-                <span className="text-zinc-400 text-xs">al</span>
                 <input
                   type="date"
                   value={fechaFin}
                   onChange={(e) => setFechaFin(e.target.value)}
-                  className="w-full rounded-xl border border-zinc-200 bg-white p-2 text-xs text-zinc-900 focus:outline-none"
+                  className="w-full min-w-0 rounded-xl border border-zinc-200 bg-white p-2 text-xs text-zinc-900 focus:outline-none"
                 />
               </div>
             </div>

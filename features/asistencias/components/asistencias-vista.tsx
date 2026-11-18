@@ -307,32 +307,33 @@ export function AsistenciasVista({
             </div>
 
             {/* Fechas Manuales */}
-            <div className="flex items-center gap-2 text-xs">
-              <input
-                type="date"
-                value={fechaInicio}
-                onChange={(e) => {
-                  setFechaInicio(e.target.value);
-                  setFiltroRapido("custom");
-                }}
-                className="rounded-xl border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-900"
-              />
-              <span className="text-zinc-400">al</span>
-              <input
-                type="date"
-                value={fechaFin}
-                onChange={(e) => {
-                  setFechaFin(e.target.value);
-                  setFiltroRapido("custom");
-                }}
-                className="rounded-xl border border-zinc-200 bg-white px-2.5 py-1 text-xs text-zinc-900"
-              />
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 text-xs w-full sm:w-auto min-w-0">
+              <div className="grid grid-cols-2 sm:flex sm:items-center gap-1.5 flex-1 min-w-0">
+                <input
+                  type="date"
+                  value={fechaInicio}
+                  onChange={(e) => {
+                    setFechaInicio(e.target.value);
+                    setFiltroRapido("custom");
+                  }}
+                  className="w-full min-w-0 rounded-xl border border-zinc-200 bg-white px-2.5 py-1.5 text-xs text-zinc-900"
+                />
+                <input
+                  type="date"
+                  value={fechaFin}
+                  onChange={(e) => {
+                    setFechaFin(e.target.value);
+                    setFiltroRapido("custom");
+                  }}
+                  className="w-full min-w-0 rounded-xl border border-zinc-200 bg-white px-2.5 py-1.5 text-xs text-zinc-900"
+                />
+              </div>
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => ejecutarConsulta(fechaInicio, fechaFin, empleadoSeleccionado)}
                 disabled={isPendingFilter}
-                className="rounded-xl h-7 px-3 text-xs"
+                className="rounded-xl h-8 px-3 text-xs w-full sm:w-auto shrink-0"
               >
                 {isPendingFilter ? <Loader2 className="h-3 w-3 animate-spin" /> : "Filtrar"}
               </Button>
@@ -579,25 +580,25 @@ export function AsistenciasVista({
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="space-y-1 min-w-0">
                   <label className="font-semibold text-zinc-700 block">Fecha</label>
                   <input
                     type="date"
                     required
                     value={manualFecha}
                     onChange={(e) => setManualFecha(e.target.value)}
-                    className="w-full rounded-xl border border-zinc-200 bg-white p-2 text-xs text-zinc-900 focus:outline-none focus:border-zinc-900"
+                    className="w-full min-w-0 rounded-xl border border-zinc-200 bg-white p-2 text-xs text-zinc-900 focus:outline-none focus:border-zinc-900"
                   />
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-1 min-w-0">
                   <label className="font-semibold text-zinc-700 block">Hora</label>
                   <input
                     type="time"
                     required
                     value={manualHora}
                     onChange={(e) => setManualHora(e.target.value)}
-                    className="w-full rounded-xl border border-zinc-200 bg-white p-2 text-xs text-zinc-900 focus:outline-none focus:border-zinc-900"
+                    className="w-full min-w-0 rounded-xl border border-zinc-200 bg-white p-2 text-xs text-zinc-900 focus:outline-none focus:border-zinc-900"
                   />
                 </div>
               </div>

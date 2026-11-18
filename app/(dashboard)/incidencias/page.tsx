@@ -59,18 +59,16 @@ async function IncidenciasContenido() {
 
   const adminClient = createAdminClient();
 
-  // 1. Cargar incidencias
-  const { incidencias } = await obtenerIncidenciasAdmin();
-
-  // 2. Cargar catálogo de empleados para selector de filtros
-  const { data: empleados } = await adminClient
-    .from("empleados")
-    .select("id, nombre, apellidos, numero_empleado")
-    .eq("activo", true)
-    .order("nombre");
-
-  // 3. Monitoreo de cuota gratuita de Storage
-  const monitoreo = await obtenerMonitoreoBucketJustificantes();
+  // Cargar incidencias, catálogo de empleados y monitoreo de cuota de Storage en paralelo (1 round-trip)
+  const [{ incidencias }, { data: empleados }, monitoreo] = await Promise.all([
+    obtenerIncidenciasAdmin(),
+    adminClient
+      .from("empleados")
+      .select("id, nombre, apellidos, numero_empleado")
+      .eq("activo", true)
+      .order("nombre"),
+    obtenerMonitoreoBucketJustificantes(),
+  ]);
 
   return (
     <div className="py-2">

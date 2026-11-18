@@ -1,7 +1,7 @@
 // NOLAN by WYLEN - Service Worker Seguro
 // Cumple con la normativa LFT: No almacena en caché marcajes ni datos sensibles.
 
-const CACHE_NAME = "nolan-static-v2";
+const CACHE_NAME = "nolan-static-v3";
 
 // Solo assets estáticos e inmutables del cascarón de ambas aplicaciones (Admin y Checador)
 const STATIC_ASSETS = [
@@ -57,24 +57,27 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 2. EXCLUSIONES ESTRICTAS (Nunca almacenar en caché):
+  // 2. EXCLUSIONES ESTRICTAS (Nunca almacenar ni bloquear streaming en Service Worker):
   // - Supabase (datos de BD, autenticación y sesiones)
-  // - Server Actions y APIs internas
+  // - Server Actions, RSC streams y APIs internas
   // - Google Maps / Places API
-  // - Rutas de marcaje y checador
   const isSupabase = url.hostname.includes("supabase.co");
   const isInternalApi = url.pathname.startsWith("/api");
-  const isNextData = url.searchParams.has("_rsc");
+  const isNextData =
+    url.searchParams.has("_rsc") ||
+    request.headers.get("RSC") === "1" ||
+    request.headers.get("Next-Router-Prefetch") === "1" ||
+    request.headers.get("Next-Router-State-Tree") !== null;
   const isGoogleMaps =
     url.hostname.includes("googleapis.com") ||
     url.hostname.includes("gstatic.com");
 
   if (isSupabase || isInternalApi || isNextData || isGoogleMaps) {
-    // Red directa incondicional
+    // Red directa incondicional (permite streaming inmediato de Suspense en iOS/Android PWA)
     return;
   }
 
-  // 3. Rutas dinámicas y operativas (Network-First estricto sin almacenar respuestas dinámicas)
+  // 3. Rutas dinámicas y operativas (Solo interceptar navegación HTML directa para fallback offline)
   const isOperationalRoute =
     url.pathname.startsWith("/checador") ||
     url.pathname.startsWith("/asistencias") ||
@@ -84,7 +87,7 @@ self.addEventListener("fetch", (event) => {
     url.pathname.startsWith("/empleados") ||
     url.pathname.startsWith("/configuracion");
 
-  if (isOperationalRoute) {
+  if (isOperationalRoute && request.mode === "navigate") {
     // Las operaciones requieren red real para garantizar inmutabilidad y hora legal exacta
     event.respondWith(
       fetch(request).catch(() => {

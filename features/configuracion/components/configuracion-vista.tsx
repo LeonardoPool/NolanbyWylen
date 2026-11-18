@@ -762,29 +762,63 @@ export function ConfiguracionVista({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-zinc-700">Hora de Entrada</label>
-                    <input
-                      type="time"
-                      required
-                      value={horaEntradaSemanal}
-                      onChange={(e) => setHoraEntradaSemanal(e.target.value)}
-                      disabled={!esAdmin || isPendingHorario}
-                      className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-mono font-medium text-zinc-900 focus:border-zinc-900 focus:outline-none"
-                    />
+                <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                  <div className="space-y-1 min-w-0">
+                    <label className="text-[11px] font-medium text-zinc-700 block truncate">
+                      Hora de Entrada
+                    </label>
+                    <div className="relative flex items-center justify-between w-full min-w-0 overflow-hidden rounded-xl border border-zinc-200 bg-white px-3 py-2.5 shadow-2xs focus-within:border-zinc-900 focus-within:ring-2 focus-within:ring-zinc-900/10 transition-all">
+                      <span className="text-xs sm:text-sm font-mono font-bold text-zinc-900 tracking-tight">
+                        {horaEntradaSemanal}
+                      </span>
+                      <span className="text-[10px] font-medium text-zinc-400 flex items-center gap-1 shrink-0">
+                        hrs
+                        <Clock className="h-3.5 w-3.5 text-zinc-400" />
+                      </span>
+                      <input
+                        type="time"
+                        required
+                        value={horaEntradaSemanal}
+                        onChange={(e) => setHoraEntradaSemanal(e.target.value)}
+                        onClick={(e) => {
+                          try {
+                            (e.currentTarget as HTMLInputElement).showPicker?.();
+                          } catch {}
+                        }}
+                        disabled={!esAdmin || isPendingHorario}
+                        aria-label="Hora de Entrada Semanal"
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base"
+                      />
+                    </div>
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-zinc-700">Hora de Salida</label>
-                    <input
-                      type="time"
-                      required
-                      value={horaSalidaSemanal}
-                      onChange={(e) => setHoraSalidaSemanal(e.target.value)}
-                      disabled={!esAdmin || isPendingHorario}
-                      className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-mono font-medium text-zinc-900 focus:border-zinc-900 focus:outline-none"
-                    />
+                  <div className="space-y-1 min-w-0">
+                    <label className="text-[11px] font-medium text-zinc-700 block truncate">
+                      Hora de Salida
+                    </label>
+                    <div className="relative flex items-center justify-between w-full min-w-0 overflow-hidden rounded-xl border border-zinc-200 bg-white px-3 py-2.5 shadow-2xs focus-within:border-zinc-900 focus-within:ring-2 focus-within:ring-zinc-900/10 transition-all">
+                      <span className="text-xs sm:text-sm font-mono font-bold text-zinc-900 tracking-tight">
+                        {horaSalidaSemanal}
+                      </span>
+                      <span className="text-[10px] font-medium text-zinc-400 flex items-center gap-1 shrink-0">
+                        hrs
+                        <Clock className="h-3.5 w-3.5 text-zinc-400" />
+                      </span>
+                      <input
+                        type="time"
+                        required
+                        value={horaSalidaSemanal}
+                        onChange={(e) => setHoraSalidaSemanal(e.target.value)}
+                        onClick={(e) => {
+                          try {
+                            (e.currentTarget as HTMLInputElement).showPicker?.();
+                          } catch {}
+                        }}
+                        disabled={!esAdmin || isPendingHorario}
+                        aria-label="Hora de Salida Semanal"
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -834,27 +868,29 @@ export function ConfiguracionVista({
                       </div>
                     </div>
 
-                    <label className="relative inline-flex items-center gap-2 cursor-pointer">
+                    <label className="inline-flex items-center gap-2 cursor-pointer shrink-0">
                       <span className="text-[11px] font-medium text-zinc-700">
                         {sabadoLaborable ? "Habilitado" : "Deshabilitado"}
                       </span>
-                      <input
-                        type="checkbox"
-                        checked={sabadoLaborable}
-                        disabled={!esAdmin || isPendingHorario}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          setSabadoLaborable(checked);
-                          if (checked && diasFinDeSemana.length === 0) {
-                            // Sugerir inteligentemente Sábado (6) o el primer día libre
-                            const candidato = !diasSemanal.includes(6) ? 6 : 0;
-                            setDiasFinDeSemana([candidato]);
-                            setDiasSemanal((prev) => prev.filter((d) => d !== candidato));
-                          }
-                        }}
-                        className="sr-only peer"
-                      />
-                      <div className="w-9 h-5 bg-zinc-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] peer-checked:after:right-auto after:left-[calc(100%-34px)] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
+                      <span className="relative inline-flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={sabadoLaborable}
+                          disabled={!esAdmin || isPendingHorario}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setSabadoLaborable(checked);
+                            if (checked && diasFinDeSemana.length === 0) {
+                              // Sugerir inteligentemente Sábado (6) o el primer día libre
+                              const candidato = !diasSemanal.includes(6) ? 6 : 0;
+                              setDiasFinDeSemana([candidato]);
+                              setDiasSemanal((prev) => prev.filter((d) => d !== candidato));
+                            }
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-zinc-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
+                      </span>
                     </label>
                   </div>
 
@@ -888,29 +924,63 @@ export function ConfiguracionVista({
 
                   {sabadoLaborable && diasFinDeSemana.length > 0 ? (
                     <>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <label className="text-[11px] font-medium text-zinc-700">Hora de Entrada</label>
-                          <input
-                            type="time"
-                            required
-                            value={horaEntradaSabado}
-                            onChange={(e) => setHoraEntradaSabado(e.target.value)}
-                            disabled={!esAdmin || isPendingHorario}
-                            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-mono font-medium text-zinc-900 focus:border-zinc-900 focus:outline-none"
-                          />
+                      <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                        <div className="space-y-1 min-w-0">
+                          <label className="text-[11px] font-medium text-zinc-700 block truncate">
+                            Hora de Entrada
+                          </label>
+                          <div className="relative flex items-center justify-between w-full min-w-0 overflow-hidden rounded-xl border border-zinc-200 bg-white px-3 py-2.5 shadow-2xs focus-within:border-zinc-900 focus-within:ring-2 focus-within:ring-zinc-900/10 transition-all">
+                            <span className="text-xs sm:text-sm font-mono font-bold text-zinc-900 tracking-tight">
+                              {horaEntradaSabado}
+                            </span>
+                            <span className="text-[10px] font-medium text-zinc-400 flex items-center gap-1 shrink-0">
+                              hrs
+                              <Clock className="h-3.5 w-3.5 text-zinc-400" />
+                            </span>
+                            <input
+                              type="time"
+                              required
+                              value={horaEntradaSabado}
+                              onChange={(e) => setHoraEntradaSabado(e.target.value)}
+                              onClick={(e) => {
+                                try {
+                                  (e.currentTarget as HTMLInputElement).showPicker?.();
+                                } catch {}
+                              }}
+                              disabled={!esAdmin || isPendingHorario}
+                              aria-label="Hora de Entrada Segundo Horario"
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base"
+                            />
+                          </div>
                         </div>
 
-                        <div className="space-y-1">
-                          <label className="text-[11px] font-medium text-zinc-700">Hora de Salida</label>
-                          <input
-                            type="time"
-                            required
-                            value={horaSalidaSabado}
-                            onChange={(e) => setHoraSalidaSabado(e.target.value)}
-                            disabled={!esAdmin || isPendingHorario}
-                            className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-mono font-medium text-zinc-900 focus:border-zinc-900 focus:outline-none"
-                          />
+                        <div className="space-y-1 min-w-0">
+                          <label className="text-[11px] font-medium text-zinc-700 block truncate">
+                            Hora de Salida
+                          </label>
+                          <div className="relative flex items-center justify-between w-full min-w-0 overflow-hidden rounded-xl border border-zinc-200 bg-white px-3 py-2.5 shadow-2xs focus-within:border-zinc-900 focus-within:ring-2 focus-within:ring-zinc-900/10 transition-all">
+                            <span className="text-xs sm:text-sm font-mono font-bold text-zinc-900 tracking-tight">
+                              {horaSalidaSabado}
+                            </span>
+                            <span className="text-[10px] font-medium text-zinc-400 flex items-center gap-1 shrink-0">
+                              hrs
+                              <Clock className="h-3.5 w-3.5 text-zinc-400" />
+                            </span>
+                            <input
+                              type="time"
+                              required
+                              value={horaSalidaSabado}
+                              onChange={(e) => setHoraSalidaSabado(e.target.value)}
+                              onClick={(e) => {
+                                try {
+                                  (e.currentTarget as HTMLInputElement).showPicker?.();
+                                } catch {}
+                              }}
+                              disabled={!esAdmin || isPendingHorario}
+                              aria-label="Hora de Salida Segundo Horario"
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base"
+                            />
+                          </div>
                         </div>
                       </div>
 
