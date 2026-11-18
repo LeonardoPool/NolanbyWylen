@@ -15,12 +15,14 @@ import {
   Clock,
   Loader2,
   UserCheck,
+  FileSpreadsheet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { notify } from "@/lib/feedback/toast";
 import {
   obtenerReporteInspeccionSTPS,
+  generarExcelReporteAsistencias,
   type RespuestaReporteInspeccion,
   type ReporteEmpleadoLFT,
 } from "../actions";
@@ -44,6 +46,7 @@ export function ReportesVista({
   const [fechaFin, setFechaFin] = useState(fechaFinDefault);
   const [empleadoId, setEmpleadoId] = useState("todos");
   const [isPending, startTransition] = useTransition();
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
 
   function aplicarPeriodoRapido(tipo: "quincena_actual" | "mes_actual" | "quincena_anterior" | "mes_anterior") {
     const ahora = new Date();
@@ -99,6 +102,58 @@ export function ReportesVista({
         notify.error("Error al generar", res.error);
       }
     });
+  }
+
+  async function handleExportarExcel() {
+    try {
+      setIsExportingExcel(true);
+      const res = await generarExcelReporteAsistencias({
+        fechaInicio,
+        fechaFin,
+        empleadoId,
+      });
+
+      if (!res.success || !res.base64) {
+        notify.error("Error al exportar", res.error || "No se pudo generar el archivo Excel.");
+        return;
+      }
+
+      // Decodificar Base64 a ArrayBuffer para Blob nativo XLSX
+      const binaryString = atob(res.base64);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = res.nombreArchivo || `NOLAN_Reporte_Asistencias_${fechaInicio}_${fechaFin}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      const resumen = res.resumen;
+      notify.success(
+        "Excel Corporativo Generado",
+        `${resumen?.totalJornadas || 0} jornadas y ${resumen?.totalMarcajes || 0} marcajes incluidos.`
+      );
+
+      if (resumen && (resumen.totalConFoto > 0 || resumen.totalBiometricos > 0)) {
+        notify.info(
+          "Trazabilidad de Evidencias",
+          `${resumen.totalConFoto} fotos selfie y ${resumen.totalBiometricos} registros biométricos verificados.`
+        );
+      }
+    } catch (err) {
+      notify.error("Error inesperado", err instanceof Error ? err.message : "Falla al procesar Excel.");
+    } finally {
+      setIsExportingExcel(false);
+    }
   }
 
   // Exportar a CSV con BOM UTF-8 para Excel
@@ -168,23 +223,42 @@ export function ReportesVista({
             Evidencia defendible conforme al Art. 132 fracción XXXIV de la Ley Federal del Trabajo.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleExportarExcel}
+            disabled={isExportingExcel}
+            className="rounded-xl text-xs bg-emerald-700 hover:bg-emerald-800 text-white shadow-sm font-semibold h-8"
+          >
+            {isExportingExcel ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                Generando Excel...
+              </>
+            ) : (
+              <>
+                <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5 text-emerald-100" />
+                Descargar Excel (.xlsx)
+              </>
+            )}
+          </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={exportarCSV}
-            className="rounded-xl text-xs text-zinc-700 shadow-2xs"
+            className="rounded-xl text-xs text-zinc-600 hover:text-zinc-900 border-zinc-200 shadow-2xs h-8"
+            title="Exportar archivo de texto plano CSV"
           >
-            <Download className="h-3.5 w-3.5 mr-1.5 text-zinc-500" />
-            Exportar Excel / CSV
+            <Download className="h-3.5 w-3.5 mr-1.5 text-zinc-400" />
+            CSV
           </Button>
           <Button
             size="sm"
             onClick={handleImprimir}
-            className="rounded-xl text-xs bg-zinc-900 text-white hover:bg-zinc-800 shadow-sm"
+            className="rounded-xl text-xs bg-zinc-900 text-white hover:bg-zinc-800 shadow-sm h-8"
           >
             <Printer className="h-3.5 w-3.5 mr-1.5" />
-            Imprimir Hoja de Inspección
+            Imprimir Hoja STPS
           </Button>
         </div>
       </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useState, useTransition, useEffect } from "react";
+import { useState, useTransition, useEffect, useMemo } from "react";
 import {
   X,
   Loader2,
@@ -18,9 +18,17 @@ import {
   Mail,
   FileBadge,
   Sparkles,
+  Palmtree,
+  CalendarCheck,
+  Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { notify } from "@/lib/feedback/toast";
+import {
+  calcularAniversariosCumplidos,
+  calcularDiasPorAnioServicioLFT,
+} from "@/lib/lft/vacaciones-lft";
 import { crearEmpleado, actualizarEmpleado, type EmpleadoRow } from "../actions";
 
 interface EmpleadoDialogProps {
@@ -70,6 +78,31 @@ export function EmpleadoDialog({
   const [pin, setPin] = useState("");
   const [permiteChecadoWeb, setPermiteChecadoWeb] = useState(true);
 
+  // Control de Vacaciones Previas (para colaboradores con antigüedad acumulada)
+  const [haTomadoVacaciones, setHaTomadoVacaciones] = useState<boolean | null>(null);
+  const [diasTomadosVacaciones, setDiasTomadosVacaciones] = useState<number>(0);
+
+  // Cálculo dinámico de derechos devengados por aniversario LFT
+  const datosVacaciones = useMemo(() => {
+    if (!fechaIngreso || fechaIngreso.length !== 10) return null;
+    try {
+      const info = calcularAniversariosCumplidos(fechaIngreso);
+      let devengados = 0;
+      for (let i = 1; i <= info.aniosCumplidos; i++) {
+        devengados += calcularDiasPorAnioServicioLFT(i);
+      }
+      return {
+        aniosCumplidos: info.aniosCumplidos,
+        devengados,
+        fechaUltimoAniversario: info.fechaUltimoAniversario,
+        fechaProximoAniversario: info.fechaProximoAniversario,
+        diasParaProximoAniversario: info.diasParaProximoAniversario,
+      };
+    } catch {
+      return null;
+    }
+  }, [fechaIngreso]);
+
   const esEdicion = Boolean(empleadoAEditar);
 
   useEffect(() => {
@@ -105,6 +138,8 @@ export function EmpleadoDialog({
       setCorreo("");
       setPin("");
       setPermiteChecadoWeb(true);
+      setHaTomadoVacaciones(null);
+      setDiasTomadosVacaciones(0);
     }
     setErrorLocal(null);
     setPestañaActiva("general");
@@ -136,6 +171,17 @@ export function EmpleadoDialog({
     if (correo.trim()) formData.append("correo", correo.trim().toLowerCase());
     if (pin.trim()) formData.append("pin", pin.trim());
     formData.append("permite_checado_web", permiteChecadoWeb ? "true" : "false");
+
+    // Si tiene antigüedad de 1+ años y ya tomó vacaciones, enviar los días disfrutados previos
+    if (
+      !esEdicion &&
+      datosVacaciones &&
+      datosVacaciones.aniosCumplidos >= 1 &&
+      haTomadoVacaciones === true &&
+      diasTomadosVacaciones > 0
+    ) {
+      formData.append("dias_vacaciones_tomados_previos", diasTomadosVacaciones.toString());
+    }
 
     startTransition(async () => {
       try {
@@ -410,6 +456,154 @@ export function EmpleadoDialog({
                   />
                 </div>
               </div>
+
+              {/* CONTROL DINÁMICO DE VACACIONES SEGÚN FECHA DE INGRESO (LFT) */}
+              {!esEdicion && datosVacaciones && (
+                <div className="pt-2">
+                  {datosVacaciones.aniosCumplidos === 0 ? (
+                    <div className="rounded-2xl border border-blue-200/80 bg-blue-50/40 p-3.5 text-xs space-y-1 animate-in fade-in duration-150">
+                      <div className="flex items-center gap-1.5 font-bold text-blue-900">
+                        <CalendarCheck className="h-4 w-4 text-blue-600" />
+                        <span>Control Vacacional LFT: Nuevo Ingreso</span>
+                      </div>
+                      <p className="text-[11px] text-blue-800 leading-relaxed">
+                        El colaborador ingresó recientemente (&lt; 1 año de antigüedad). Conforme al Art. 76 de la LFT, su derecho inicial a vacaciones (<strong>12 días</strong>) se generará al cumplir su primer aniversario el <strong>{datosVacaciones.fechaProximoAniversario}</strong>.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-4 text-xs space-y-3.5 animate-in fade-in duration-150">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 rounded-xl bg-amber-100 text-amber-800">
+                            <Palmtree className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <span className="font-bold text-zinc-900 block text-xs">
+                              Control de Vacaciones Previas (Antigüedad Reconocida)
+                            </span>
+                            <span className="text-[11px] text-zinc-600">
+                              {datosVacaciones.aniosCumplidos} año{datosVacaciones.aniosCumplidos > 1 ? "s" : ""} de servicio cumplido{datosVacaciones.aniosCumplidos > 1 ? "s" : ""} · {datosVacaciones.devengados} días generados por ley
+                            </span>
+                          </div>
+                        </div>
+                        <Badge variant="outline" className="text-[10px] bg-white border-amber-300 text-amber-800 font-mono shrink-0">
+                          {datosVacaciones.devengados} días LFT
+                        </Badge>
+                      </div>
+
+                      <p className="text-[11px] text-zinc-700 leading-snug">
+                        Por su fecha de ingreso ({fechaIngreso}), este trabajador ya acumuló <strong>{datosVacaciones.devengados} días</strong> de vacaciones de sus periodos de aniversario anteriores.
+                      </p>
+
+                      {/* Pregunta interactiva obligatoria */}
+                      <div className="pt-2.5 border-t border-amber-200/80 space-y-2">
+                        <label className="font-bold text-zinc-900 block text-xs">
+                          ¿El trabajador ya tomó días de vacaciones de sus periodos anteriores?
+                        </label>
+                        <div className="grid grid-cols-2 gap-2.5 sm:w-80">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setHaTomadoVacaciones(false);
+                              setDiasTomadosVacaciones(0);
+                            }}
+                            className={`px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                              haTomadoVacaciones === false
+                                ? "bg-zinc-900 border-zinc-900 text-white shadow-xs"
+                                : "bg-white border-zinc-300 text-zinc-700 hover:bg-zinc-50"
+                            }`}
+                          >
+                            No, aún no las toma
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setHaTomadoVacaciones(true);
+                              if (diasTomadosVacaciones <= 0) {
+                                setDiasTomadosVacaciones(datosVacaciones.devengados);
+                              }
+                            }}
+                            className={`px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                              haTomadoVacaciones === true
+                                ? "bg-amber-600 border-amber-600 text-white shadow-xs"
+                                : "bg-white border-zinc-300 text-zinc-700 hover:bg-zinc-50"
+                            }`}
+                          >
+                            Sí, ya tomó vacaciones
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Si ya tomó vacaciones, preguntar cuántos días */}
+                      {haTomadoVacaciones === true && (
+                        <div className="pt-2.5 border-t border-amber-200/80 space-y-2.5 animate-in fade-in duration-150">
+                          <div className="flex items-center justify-between">
+                            <label htmlFor="dias_tomados_vacaciones" className="font-semibold text-zinc-800 text-xs">
+                              ¿Cuántos días de vacaciones ya disfrutó?
+                            </label>
+                            <span className="text-[10px] text-zinc-500 font-mono">
+                              Máximo {datosVacaciones.devengados} días
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <input
+                              id="dias_tomados_vacaciones"
+                              type="number"
+                              min={1}
+                              max={datosVacaciones.devengados}
+                              value={diasTomadosVacaciones}
+                              onChange={(e) => {
+                                const val = Math.max(0, Math.min(datosVacaciones.devengados, Number(e.target.value)));
+                                setDiasTomadosVacaciones(val);
+                              }}
+                              className="w-28 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-xs text-zinc-900 font-bold font-mono focus:border-zinc-900 focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setDiasTomadosVacaciones(datosVacaciones.devengados)}
+                              className="px-2.5 py-2 rounded-xl border border-zinc-200 bg-white text-[11px] text-zinc-700 hover:bg-zinc-50 font-medium cursor-pointer"
+                            >
+                              Tomó todas ({datosVacaciones.devengados}d)
+                            </button>
+                          </div>
+
+                          {/* Cuadro de cálculo y saldo resultante en tiempo real */}
+                          <div className="p-3 rounded-xl bg-white/95 border border-amber-200 text-xs space-y-1.5 shadow-2xs">
+                            <div className="flex items-center justify-between text-zinc-600">
+                              <span>Días acumulados por ley:</span>
+                              <span className="font-mono font-bold text-zinc-900">+{datosVacaciones.devengados} días</span>
+                            </div>
+                            <div className="flex items-center justify-between text-zinc-600">
+                              <span>Días ya disfrutados (descuento inicial):</span>
+                              <span className="font-mono font-bold text-rose-600">-{diasTomadosVacaciones} días</span>
+                            </div>
+                            <div className="pt-1.5 border-t border-zinc-100 flex items-center justify-between font-bold">
+                              <span className="text-zinc-900">Saldo inicial disponible en NOLAN:</span>
+                              <span className={`font-mono text-sm ${datosVacaciones.devengados - diasTomadosVacaciones > 0 ? "text-emerald-600" : "text-zinc-600"}`}>
+                                {Math.max(0, datosVacaciones.devengados - diasTomadosVacaciones)} días disponibles
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Si no ha tomado vacaciones, saldo completo disponible */}
+                      {haTomadoVacaciones === false && (
+                        <div className="p-3 rounded-xl bg-white/95 border border-emerald-200 text-xs text-emerald-950 flex items-center justify-between shadow-2xs animate-in fade-in duration-150">
+                          <div>
+                            <span className="font-semibold block">Saldo inicial disponible en NOLAN:</span>
+                            <span className="text-[10px] text-emerald-700">El trabajador podrá solicitar sus días acumulados de inmediato.</span>
+                          </div>
+                          <span className="font-bold font-mono text-sm text-emerald-600 shrink-0">
+                            +{datosVacaciones.devengados} días
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

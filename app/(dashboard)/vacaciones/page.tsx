@@ -34,26 +34,15 @@ function VacacionesSkeleton() {
 
 async function VacacionesContenido() {
   await connection();
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { fichas, error } = await obtenerFichasVacacionalesAdmin();
 
-  if (!user) {
+  if (error === "Sesión no válida o expirada.") {
     redirect("/login");
   }
 
-  const { data: perfil } = await supabase
-    .from("perfiles")
-    .select("rol, activo")
-    .eq("id", user.id)
-    .single();
-
-  if (!perfil?.activo || perfil.rol !== "ADMINISTRADOR") {
+  if (error === "Acceso exclusivo para administradores.") {
     redirect("/dashboard");
   }
-
-  const { fichas } = await obtenerFichasVacacionalesAdmin();
 
   return (
     <div className="py-2">

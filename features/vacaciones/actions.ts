@@ -74,43 +74,38 @@ export async function obtenerEstadoVacacionalEmpleado(
     diasDevengados += calcularDiasPorAnioServicioLFT(a);
   }
 
-  // 3. Ajustes de saldo (Carga histórica + correcciones auditadas)
+  // 3. Ajustes de saldo (Carga histórica + correcciones auditadas) y 4. Vacaciones disfrutadas en PARALELO
   let ajustesSaldo = 0;
   let listaAjustes: AjusteVacacionesRow[] = [];
+  let diasDisfrutados = 0;
+  let diasReservados = 0;
 
   try {
-    const { data: aj } = await adminClient
-      .from("ajustes_vacaciones")
-      .select("*")
-      .eq("empleado_id", emp.id)
-      .order("fecha_creacion", { ascending: false });
+    const [ajustesRes, incsRes] = await Promise.all([
+      adminClient
+        .from("ajustes_vacaciones")
+        .select("*")
+        .eq("empleado_id", emp.id)
+        .order("fecha_creacion", { ascending: false }),
+      adminClient
+        .from("incidencias_empleado")
+        .select("dias_solicitados_efectivos, estado")
+        .eq("empleado_id", emp.id)
+        .eq("tipo", "VACACIONES"),
+    ]);
 
-    if (aj) {
-      listaAjustes = aj;
-      ajustesSaldo = aj.reduce((sum, item) => {
+    if (ajustesRes.data) {
+      listaAjustes = ajustesRes.data;
+      ajustesSaldo = ajustesRes.data.reduce((sum, item) => {
         if (item.tipo === "CARGA_HISTORICA" || item.tipo === "AJUSTE_POSITIVO") {
           return sum + item.dias;
         }
         return sum - item.dias;
       }, 0);
     }
-  } catch {
-    // Tolerante si la migración de ajustes está en proceso
-  }
 
-  // 4. Vacaciones disfrutadas (Aprobadas) y Reservadas (Pendientes)
-  let diasDisfrutados = 0;
-  let diasReservados = 0;
-
-  try {
-    const { data: incs } = await adminClient
-      .from("incidencias_empleado")
-      .select("dias_solicitados_efectivos, estado")
-      .eq("empleado_id", emp.id)
-      .eq("tipo", "VACACIONES");
-
-    if (incs) {
-      for (const i of incs) {
+    if (incsRes.data) {
+      for (const i of incsRes.data) {
         const d = i.dias_solicitados_efectivos || 1;
         if (i.estado === "APROBADA") {
           diasDisfrutados += d;
@@ -120,7 +115,7 @@ export async function obtenerEstadoVacacionalEmpleado(
       }
     }
   } catch {
-    // Tolerante
+    // Tolerante si la migración de ajustes está en proceso
   }
 
   // 5. Saldo disponible real
@@ -165,6 +160,7 @@ export async function obtenerEstadoVacacionalEmpleado(
 
 /**
  * Consulta las fichas vacacionales de todos los empleados activos para el Administrador.
+ * Optimizado: 1 sola verificación de permisos + 1 tanda paralela de consultas (batch) con indexación en memoria.
  */
 export async function obtenerFichasVacacionalesAdmin(): Promise<{
   fichas: FichaVacacionalEmpleado[];
@@ -191,21 +187,106 @@ export async function obtenerFichasVacacionalesAdmin(): Promise<{
 
   const adminClient = createAdminClient();
 
-  const { data: empleados, error: empErr } = await adminClient
-    .from("empleados")
-    .select("id")
-    .eq("activo", true)
-    .order("numero_empleado");
+  // Consulta en paralelo de empleados, ajustes de saldo e incidencias de vacaciones
+  const [empleadosRes, ajustesRes, incidenciasRes] = await Promise.all([
+    adminClient
+      .from("empleados")
+      .select("id, nombre, apellidos, numero_empleado, puesto, fecha_ingreso")
+      .eq("activo", true)
+      .order("numero_empleado"),
+    adminClient
+      .from("ajustes_vacaciones")
+      .select("*")
+      .order("fecha_creacion", { ascending: false }),
+    adminClient
+      .from("incidencias_empleado")
+      .select("empleado_id, dias_solicitados_efectivos, estado")
+      .eq("tipo", "VACACIONES"),
+  ]);
 
-  if (empErr || !empleados) {
+  if (empleadosRes.error || !empleadosRes.data) {
     return { fichas: [], error: "No se pudo consultar el catálogo de empleados." };
   }
 
-  const fichas: FichaVacacionalEmpleado[] = [];
-  for (const emp of empleados) {
-    const { ficha } = await obtenerEstadoVacacionalEmpleado(emp.id);
-    if (ficha) fichas.push(ficha);
+  // Indexar ajustes por empleado en memoria
+  const ajustesMap = new Map<string, { lista: AjusteVacacionesRow[]; saldo: number }>();
+  if (ajustesRes.data) {
+    for (const aj of ajustesRes.data) {
+      const item = ajustesMap.get(aj.empleado_id) || { lista: [], saldo: 0 };
+      item.lista.push(aj);
+      if (aj.tipo === "CARGA_HISTORICA" || aj.tipo === "AJUSTE_POSITIVO") {
+        item.saldo += aj.dias;
+      } else {
+        item.saldo -= aj.dias;
+      }
+      ajustesMap.set(aj.empleado_id, item);
+    }
   }
+
+  // Indexar incidencias de vacaciones por empleado en memoria
+  const incidenciasMap = new Map<string, { disfrutados: number; reservados: number }>();
+  if (incidenciasRes.data) {
+    for (const inc of incidenciasRes.data) {
+      const item = incidenciasMap.get(inc.empleado_id) || { disfrutados: 0, reservados: 0 };
+      const d = inc.dias_solicitados_efectivos || 1;
+      if (inc.estado === "APROBADA") {
+        item.disfrutados += d;
+      } else if (inc.estado === "PENDIENTE") {
+        item.reservados += d;
+      }
+      incidenciasMap.set(inc.empleado_id, item);
+    }
+  }
+
+  const hoy = obtenerFechaHoyMerida();
+
+  // Cálculo en memoria determinista sin consultas SQL adicionales (O(N) CPU pura)
+  const fichas: FichaVacacionalEmpleado[] = empleadosRes.data.map((emp) => {
+    const infoAniversario = calcularAniversariosCumplidos(emp.fecha_ingreso, hoy);
+
+    let diasDevengados = 0;
+    for (let a = 1; a <= infoAniversario.aniosCumplidos; a++) {
+      diasDevengados += calcularDiasPorAnioServicioLFT(a);
+    }
+
+    const ajInfo = ajustesMap.get(emp.id) || { lista: [], saldo: 0 };
+    const incInfo = incidenciasMap.get(emp.id) || { disfrutados: 0, reservados: 0 };
+
+    const saldoDisponible = Math.max(
+      0,
+      diasDevengados + ajInfo.saldo - incInfo.disfrutados - incInfo.reservados
+    );
+
+    let alertaPlazoArt81 = false;
+    let motivoAlertaArt81: string | undefined;
+
+    if (infoAniversario.fechaUltimoAniversario && saldoDisponible > 0) {
+      const fechaLimiteConcesion = sumarDiasAFecha(infoAniversario.fechaUltimoAniversario, 182);
+      if (compararFechasCalendario(hoy, fechaLimiteConcesion) > 0) {
+        alertaPlazoArt81 = true;
+        motivoAlertaArt81 = `El plazo legal de 6 meses posteriores al aniversario (${infoAniversario.fechaUltimoAniversario}) venció el ${fechaLimiteConcesion} conforme al Art. 81 de la LFT. Los días no se pierden pero deben programarse a la brevedad.`;
+      }
+    }
+
+    return {
+      empleadoId: emp.id,
+      nombreCompleto: `${emp.nombre} ${emp.apellidos}`.trim(),
+      numeroEmpleado: emp.numero_empleado,
+      puesto: emp.puesto,
+      fechaIngreso: emp.fecha_ingreso,
+      aniosServicioCumplidos: infoAniversario.aniosCumplidos,
+      diasDevengadosLey: diasDevengados,
+      ajustesSaldo: ajInfo.saldo,
+      diasDisfrutados: incInfo.disfrutados,
+      diasReservadosPendientes: incInfo.reservados,
+      saldoDisponible,
+      fechaProximoAniversario: infoAniversario.fechaProximoAniversario,
+      diasParaProximoAniversario: infoAniversario.diasParaProximoAniversario,
+      alertaPlazoArt81,
+      motivoAlertaArt81,
+      ajustes: ajInfo.lista,
+    };
+  });
 
   return { fichas };
 }

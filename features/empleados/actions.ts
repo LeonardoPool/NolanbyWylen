@@ -189,6 +189,7 @@ export async function crearEmpleado(formData: FormData): Promise<EmpleadoActionR
     pin: formData.get("pin") || undefined,
     permite_checado_web: formData.get("permite_checado_web") !== "false",
     fecha_ingreso: formData.get("fecha_ingreso") || undefined,
+    dias_vacaciones_tomados_previos: formData.get("dias_vacaciones_tomados_previos") || undefined,
   };
 
   const validation = empleadoSchema.safeParse(rawData);
@@ -229,6 +230,25 @@ export async function crearEmpleado(formData: FormData): Promise<EmpleadoActionR
     };
   }
 
+  // Si se indicaron días de vacaciones ya tomados previamente a su alta en NOLAN,
+  // registrar el ajuste inicial negativo en la bitácora de vacaciones (LFT)
+  const diasTomados = payload.dias_vacaciones_tomados_previos;
+  if (diasTomados && diasTomados > 0 && nuevoEmpleado.fecha_ingreso) {
+    try {
+      const adminClient = createAdminClient();
+      await adminClient.from("ajustes_vacaciones").insert({
+        empleado_id: nuevoEmpleado.id,
+        tipo: "AJUSTE_NEGATIVO",
+        dias: Math.round(diasTomados),
+        motivo: `Carga inicial de saldo: El colaborador ya disfrutó ${diasTomados} día(s) de vacaciones de sus periodos anteriores previos al alta en NOLAN.`,
+        autor_perfil_id: authCheck.userId,
+      });
+      revalidatePath("/vacaciones");
+    } catch (errVac) {
+      console.error("[Carga Inicial Vacaciones] Error al registrar ajuste de vacaciones:", errVac);
+    }
+  }
+
   await registrarAuditoria({
     perfilId: authCheck.userId,
     accion: "ALTA_EMPLEADO",
@@ -239,6 +259,7 @@ export async function crearEmpleado(formData: FormData): Promise<EmpleadoActionR
 
   revalidatePath("/empleados");
   revalidatePath("/dashboard");
+  revalidatePath("/vacaciones");
 
   return {
     success: true,
@@ -277,6 +298,7 @@ export async function actualizarEmpleado(
     pin: formData.get("pin") || undefined,
     permite_checado_web: formData.get("permite_checado_web") !== "false",
     fecha_ingreso: formData.get("fecha_ingreso") || undefined,
+    dias_vacaciones_tomados_previos: formData.get("dias_vacaciones_tomados_previos") || undefined,
   };
 
   const validation = empleadoSchema.safeParse(rawData);

@@ -73,6 +73,11 @@ export const empleadoSchema = z.object({
     .trim()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "La fecha de ingreso debe tener formato YYYY-MM-DD.")
     .optional(),
+  dias_vacaciones_tomados_previos: z
+    .coerce
+    .number()
+    .min(0, "Los días de vacaciones no pueden ser negativos.")
+    .optional(),
 });
 
 export type EmpleadoInput = z.infer<typeof empleadoSchema>;
