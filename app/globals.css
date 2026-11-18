@@ -76,3 +76,67 @@ input[type="date"]::-webkit-datetime-edit {
   padding: 0;
   min-width: 0;
 }
+
+/* Animaciones fluidas y escalonadas para el panel interactivo del Dashboard */
+@keyframes nolanStaggerUp {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes nolanBadgePop {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes nolanConnectorGrow {
+  0% {
+    opacity: 0;
+    transform: scaleY(0);
+  }
+  100% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+.animate-nolan-stagger {
+  opacity: 0;
+  animation: nolanStaggerUp 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.animate-nolan-pop {
+  opacity: 0;
+  animation: nolanBadgePop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.animate-nolan-connector {
+  transform-origin: top center;
+  opacity: 0;
+  animation: nolanConnectorGrow 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-nolan-stagger,
+  .animate-nolan-pop,
+  .animate-nolan-connector {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}

@@ -73,40 +73,100 @@ export function GeofenceMapPicker({
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    if (window.google?.maps) {
-      setMapLoaded(true);
-      return;
+    let isMounted = true;
+
+    async function checkOrImportMaps(): Promise<boolean> {
+      if (typeof window.google?.maps?.Map === "function") {
+        return true;
+      }
+      if (typeof window.google?.maps?.importLibrary === "function") {
+        try {
+          await window.google.maps.importLibrary("maps");
+          if (typeof window.google?.maps?.Map === "function") {
+            return true;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      return false;
     }
+
+    checkOrImportMaps().then((ready) => {
+      if (ready && isMounted) {
+        setMapLoaded(true);
+      }
+    });
 
     const scriptId = "google-maps-script";
-    const existingScript = document.getElementById(scriptId) as HTMLScriptElement | null;
+    let script = document.getElementById(scriptId) as HTMLScriptElement | null;
 
-    if (existingScript) {
-      if (window.google?.maps) {
+    const onScriptReady = async () => {
+      const ready = await checkOrImportMaps();
+      if (ready && isMounted) {
         setMapLoaded(true);
       } else {
-        existingScript.addEventListener("load", () => setMapLoaded(true));
+        let attempts = 0;
+        const interval = setInterval(async () => {
+          attempts++;
+          const isReady = await checkOrImportMaps();
+          if (isReady) {
+            clearInterval(interval);
+            if (isMounted) setMapLoaded(true);
+          } else if (attempts > 30) {
+            clearInterval(interval);
+          }
+        }, 150);
       }
-      return;
-    }
-
-    window.__initGoogleMaps = () => {
-      setMapLoaded(true);
     };
 
-    const script = document.createElement("script");
+    window.__initGoogleMaps = () => {
+      onScriptReady();
+    };
+
+    if (script) {
+      checkOrImportMaps().then((ready) => {
+        if (ready && isMounted) {
+          setMapLoaded(true);
+        } else {
+          script?.addEventListener("load", onScriptReady);
+          let attempts = 0;
+          const interval = setInterval(async () => {
+            attempts++;
+            const isReady = await checkOrImportMaps();
+            if (isReady) {
+              clearInterval(interval);
+              if (isMounted) setMapLoaded(true);
+            } else if (attempts > 30) {
+              clearInterval(interval);
+            }
+          }, 150);
+        }
+      });
+      return () => {
+        isMounted = false;
+        script?.removeEventListener("load", onScriptReady);
+      };
+    }
+
+    script = document.createElement("script");
     script.id = scriptId;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&loading=async&libraries=places,marker&callback=__initGoogleMaps`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places,marker&callback=__initGoogleMaps`;
     script.async = true;
     script.defer = true;
 
+    script.addEventListener("load", onScriptReady);
     script.onerror = () => {
-      setLoadError("No se pudo conectar con la API de Google Maps. Revisa la conectividad.");
+      if (isMounted) {
+        setLoadError("No se pudo conectar con la API de Google Maps. Revisa la conectividad.");
+      }
     };
 
     document.head.appendChild(script);
 
     return () => {
+      isMounted = false;
+      script?.removeEventListener("load", onScriptReady);
       delete window.__initGoogleMaps;
     };
   }, [apiKey]);
@@ -129,7 +189,13 @@ export function GeofenceMapPicker({
 
   // Inicializar mapa y marcador
   useEffect(() => {
-    if (!mapLoaded || !mapContainerRef.current || !window.google?.maps) return;
+    if (
+      !mapLoaded ||
+      !mapContainerRef.current ||
+      typeof window.google?.maps?.Map !== "function"
+    ) {
+      return;
+    }
 
     const initialPos = {
       lat: !isNaN(latitud) && latitud !== 0 ? latitud : 19.432608,

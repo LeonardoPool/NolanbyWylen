@@ -48,99 +48,168 @@ export function GoogleMapMarcajes({
     process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
     "AIzaSyDTWIUl2XbrZmEbxu3TC6Js_LwfLmSZ_mo";
 
-  // Cargar SDK oficial de Google Maps si no está presente en window
+  // Cargar SDK oficial de Google Maps asegurando que Map sea un constructor válido
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    if (window.google?.maps) {
-      setMapLoaded(true);
-      return;
+    let isMounted = true;
+
+    async function checkOrImportMaps(): Promise<boolean> {
+      if (typeof window.google?.maps?.Map === "function") {
+        return true;
+      }
+      if (typeof window.google?.maps?.importLibrary === "function") {
+        try {
+          await window.google.maps.importLibrary("maps");
+          if (typeof window.google?.maps?.Map === "function") {
+            return true;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      return false;
     }
+
+    // Verificar si ya está disponible inmediatamente
+    checkOrImportMaps().then((ready) => {
+      if (ready && isMounted) {
+        setMapLoaded(true);
+      }
+    });
 
     const scriptId = "google-maps-script";
-    const existingScript = document.getElementById(scriptId) as HTMLScriptElement | null;
+    let script = document.getElementById(scriptId) as HTMLScriptElement | null;
 
-    if (existingScript) {
-      if (window.google?.maps) {
+    const onScriptReady = async () => {
+      const ready = await checkOrImportMaps();
+      if (ready && isMounted) {
         setMapLoaded(true);
       } else {
-        existingScript.addEventListener("load", () => setMapLoaded(true));
+        // En caso de que la carga asíncrona tome unos ms adicionales
+        let attempts = 0;
+        const interval = setInterval(async () => {
+          attempts++;
+          const isReady = await checkOrImportMaps();
+          if (isReady) {
+            clearInterval(interval);
+            if (isMounted) setMapLoaded(true);
+          } else if (attempts > 30) {
+            clearInterval(interval);
+          }
+        }, 150);
       }
-      return;
-    }
-
-    window.__initGoogleMapsDashboard = () => {
-      setMapLoaded(true);
     };
 
-    const script = document.createElement("script");
+    window.__initGoogleMapsDashboard = () => {
+      onScriptReady();
+    };
+
+    if (script) {
+      checkOrImportMaps().then((ready) => {
+        if (ready && isMounted) {
+          setMapLoaded(true);
+        } else {
+          script?.addEventListener("load", onScriptReady);
+          let attempts = 0;
+          const interval = setInterval(async () => {
+            attempts++;
+            const isReady = await checkOrImportMaps();
+            if (isReady) {
+              clearInterval(interval);
+              if (isMounted) setMapLoaded(true);
+            } else if (attempts > 30) {
+              clearInterval(interval);
+            }
+          }, 150);
+        }
+      });
+      return () => {
+        isMounted = false;
+        script?.removeEventListener("load", onScriptReady);
+      };
+    }
+
+    script = document.createElement("script");
     script.id = scriptId;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&loading=async&libraries=marker&callback=__initGoogleMapsDashboard`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places,marker&callback=__initGoogleMapsDashboard`;
     script.async = true;
     script.defer = true;
 
+    script.addEventListener("load", onScriptReady);
     script.onerror = () => {
-      setLoadError("No se pudo cargar la API de Google Maps.");
+      if (isMounted) {
+        setLoadError("No se pudo cargar la API de Google Maps.");
+      }
     };
 
     document.head.appendChild(script);
 
     return () => {
+      isMounted = false;
+      script?.removeEventListener("load", onScriptReady);
       delete window.__initGoogleMapsDashboard;
     };
   }, [apiKey]);
 
   // Inicializar o actualizar el mapa con los pines reales de Entrada y Salida
   useEffect(() => {
-    if (!mapLoaded || !mapContainerRef.current || !window.google?.maps) return;
-
-    // Coordenadas base
-    const latTaller = Number(configTaller.latitud) || 19.432608;
-    const lngTaller = Number(configTaller.longitud) || -99.133209;
-
-    const latEntrada = eventoEntrada?.latitud !== undefined ? Number(eventoEntrada.latitud) : null;
-    const lngEntrada = eventoEntrada?.longitud !== undefined ? Number(eventoEntrada.longitud) : null;
-
-    const latSalida = eventoSalida?.latitud !== undefined ? Number(eventoSalida.latitud) : null;
-    const lngSalida = eventoSalida?.longitud !== undefined ? Number(eventoSalida.longitud) : null;
-
-    // Determinar centro inicial
-    const centroInicial =
-      latEntrada !== null && lngEntrada !== null
-        ? { lat: latEntrada, lng: lngEntrada }
-        : { lat: latTaller, lng: lngTaller };
-
-    // Si aún no existe la instancia del mapa, crearla
-    if (!mapInstanceRef.current) {
-      mapInstanceRef.current = new window.google.maps.Map(mapContainerRef.current, {
-        center: centroInicial,
-        zoom: 16,
-        mapTypeControl: false,
-        streetViewControl: false,
-        fullscreenControl: true,
-        zoomControl: true,
-        gestureHandling: "cooperative",
-        styles: [
-          {
-            featureType: "poi",
-            elementType: "labels",
-            stylers: [{ visibility: "off" }],
-          },
-        ],
-      });
+    if (
+      !mapLoaded ||
+      !mapContainerRef.current ||
+      typeof window.google?.maps?.Map !== "function"
+    ) {
+      return;
     }
 
-    const map = mapInstanceRef.current;
+    try {
+      // Coordenadas base
+      const latTaller = Number(configTaller.latitud) || 19.432608;
+      const lngTaller = Number(configTaller.longitud) || -99.133209;
 
-    // Limpiar marcadores y polilínea anteriores
-    markersRef.current.forEach((m) => m.setMap(null));
-    markersRef.current = [];
-    if (polylineRef.current) {
-      polylineRef.current.setMap(null);
-      polylineRef.current = null;
-    }
+      const latEntrada = eventoEntrada?.latitud !== undefined ? Number(eventoEntrada.latitud) : null;
+      const lngEntrada = eventoEntrada?.longitud !== undefined ? Number(eventoEntrada.longitud) : null;
 
-    const bounds = new window.google.maps.LatLngBounds();
+      const latSalida = eventoSalida?.latitud !== undefined ? Number(eventoSalida.latitud) : null;
+      const lngSalida = eventoSalida?.longitud !== undefined ? Number(eventoSalida.longitud) : null;
+
+      // Determinar centro inicial
+      const centroInicial =
+        latEntrada !== null && lngEntrada !== null
+          ? { lat: latEntrada, lng: lngEntrada }
+          : { lat: latTaller, lng: lngTaller };
+
+      // Si aún no existe la instancia del mapa, crearla
+      if (!mapInstanceRef.current) {
+        mapInstanceRef.current = new window.google.maps.Map(mapContainerRef.current, {
+          center: centroInicial,
+          zoom: 16,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: true,
+          zoomControl: true,
+          gestureHandling: "cooperative",
+          styles: [
+            {
+              featureType: "poi",
+              elementType: "labels",
+              stylers: [{ visibility: "off" }],
+            },
+          ],
+        });
+      }
+
+      const map = mapInstanceRef.current;
+
+      // Limpiar marcadores y polilínea anteriores
+      markersRef.current.forEach((m) => m.setMap(null));
+      markersRef.current = [];
+      if (polylineRef.current) {
+        polylineRef.current.setMap(null);
+        polylineRef.current = null;
+      }
+
+      const bounds = new window.google.maps.LatLngBounds();
 
     // 1. Marcador del Taller Central
     const tallerMarker = new window.google.maps.Marker({
@@ -271,7 +340,10 @@ export function GoogleMapMarcajes({
         window.google.maps.event.removeListener(listener);
       });
     }
-  }, [mapLoaded, eventoEntrada, eventoSalida, configTaller]);
+  } catch (err) {
+    console.error("Error al renderizar Google Maps:", err);
+  }
+}, [mapLoaded, eventoEntrada, eventoSalida, configTaller]);
 
   // Coordenadas para enlaces externos a Google Maps
   const urlGoogleMapsEntrada =

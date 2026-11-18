@@ -41,6 +41,7 @@ import {
   formatearResumenDias,
   obtenerDiasSegundoHorario,
   obtenerDiasDescanso,
+  evaluarConfiguracionPorDiaSemana,
 } from "@/lib/lft/calculo-horas";
 import {
   obtenerDatosRegistroJornadaDashboard,
@@ -103,7 +104,15 @@ export function DashboardJornadaVista({ datosIniciales }: DashboardJornadaVistaP
 
   // El panel de detalle inicia CERRADO para dar máximo espacio visual al calendario
   const [mostrarPanelDetalle, setMostrarPanelDetalle] = useState<boolean>(false);
-  const [diaSeleccionado, setDiaSeleccionado] = useState<DiaCalendarioInfo | null>(null);
+  const [diaSeleccionado, setDiaSeleccionado] = useState<DiaCalendarioInfo | null>(
+    datosIniciales.diaSeleccionadoInicial || null
+  );
+
+  // Estados de animación fluida para el panel lateral (contador progresivo y aparición escalonada)
+  const [minutosAnimados, setMinutosAnimados] = useState<number>(0);
+  const [progresoBarraDetalle, setProgresoBarraDetalle] = useState<number>(0);
+  const [animKey, setAnimKey] = useState<number>(0);
+  const [anilloHoyMontado, setAnilloHoyMontado] = useState<boolean>(false);
 
   const [tabResumen, setTabResumen] = useState<"resumen" | "horario">("resumen");
   const [fotoModal, setFotoModal] = useState<{
@@ -118,7 +127,7 @@ export function DashboardJornadaVista({ datosIniciales }: DashboardJornadaVistaP
   const [ultimaSincronizacion, setUltimaSincronizacion] = useState<string>("");
   const [isPending, startTransition] = useTransition();
 
-  // Inicializar hora de sincronización local
+  // Inicializar hora de sincronización local y animación inicial del anillo de HOY
   useEffect(() => {
     setUltimaSincronizacion(
       new Date().toLocaleTimeString("es-MX", {
@@ -128,7 +137,78 @@ export function DashboardJornadaVista({ datosIniciales }: DashboardJornadaVistaP
         hour12: true,
       })
     );
+    const t = setTimeout(() => setAnilloHoyMontado(true), 80);
+    return () => clearTimeout(t);
   }, []);
+
+  // Animación fluida del contador de horas/minutos trabajados y barra de progreso al abrir o cambiar día
+  useEffect(() => {
+    if (!mostrarPanelDetalle || !diaSeleccionado) {
+      setProgresoBarraDetalle(0);
+      return;
+    }
+
+    setAnimKey((prev) => prev + 1);
+    const metaMinutos = diaSeleccionado.minutosTrabajados || 0;
+    const porcentajeMeta = Math.min(100, Math.round((metaMinutos / 480) * 100));
+
+    // Respetar prefers-reduced-motion
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    ) {
+      setMinutosAnimados(metaMinutos);
+      setProgresoBarraDetalle(porcentajeMeta);
+      return;
+    }
+
+    setMinutosAnimados(0);
+    setProgresoBarraDetalle(0);
+
+    const timerBarra = setTimeout(() => {
+      setProgresoBarraDetalle(porcentajeMeta);
+    }, 60);
+
+    if (metaMinutos <= 0) {
+      return () => clearTimeout(timerBarra);
+    }
+
+    let rafId = 0;
+    const duracionMs = 680;
+    const inicio = performance.now();
+
+    const step = (ahora: number) => {
+      const transcurrido = ahora - inicio;
+      const t = Math.min(1, transcurrido / duracionMs);
+      // Curva cubic ease-out idéntica al video de referencia
+      const eased = 1 - Math.pow(1 - t, 3);
+      setMinutosAnimados(Math.round(metaMinutos * eased));
+      if (t < 1) {
+        rafId = requestAnimationFrame(step);
+      } else {
+        setMinutosAnimados(metaMinutos);
+      }
+    };
+
+    rafId = requestAnimationFrame(step);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(timerBarra);
+    };
+  }, [mostrarPanelDetalle, diaSeleccionado]);
+
+  // Cerrar panel lateral con tecla Escape
+  useEffect(() => {
+    if (!mostrarPanelDetalle) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && !fotoModal) {
+        setMostrarPanelDetalle(false);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mostrarPanelDetalle, fotoModal]);
 
   // Función para recargar datos con feedback
   const cargarDatos = useCallback(
@@ -403,21 +483,66 @@ export function DashboardJornadaVista({ datosIniciales }: DashboardJornadaVistaP
     setMostrarPanelDetalle(true);
   }
 
+  // Navegar entre el día anterior y siguiente directamente desde el encabezado del panel lateral (< / >)
+  function navegarDiaDetalle(delta: -1 | 1) {
+    if (!diaSeleccionado || datos.diasCalendario.length === 0) return;
+    const idxActual = datos.diasCalendario.findIndex(
+      (d) => d.fecha === diaSeleccionado.fecha
+    );
+    if (idxActual === -1) return;
+    const nuevoIdx = idxActual + delta;
+    if (nuevoIdx >= 0 && nuevoIdx < datos.diasCalendario.length) {
+      setDiaSeleccionado(datos.diasCalendario[nuevoIdx]);
+      setMostrarPanelDetalle(true);
+    }
+  }
+
   // Cerrar el panel de detalle para restaurar el máximo ancho del calendario
   function handleCerrarDetalle() {
     setMostrarPanelDetalle(false);
   }
+
+  // Texto animado de horas y minutos trabajados (ej. "7 h 56 min")
+  const horasTrabajadasAnimadasStr = useMemo(() => {
+    if (!diaSeleccionado || diaSeleccionado.minutosTrabajados <= 0) return "0 h 00 min";
+    const h = Math.floor(minutosAnimados / 60);
+    const m = minutosAnimados % 60;
+    return `${h} h ${String(m).padStart(2, "0")} min`;
+  }, [diaSeleccionado, minutosAnimados]);
+
+  // Régimen horario dinámico del día seleccionado para el pie del panel ("TU HORARIO" y "TOLERANCIA")
+  const regimenDiaSeleccionado = useMemo(() => {
+    const cfg = datos.horarioLaboralConfig || HORARIO_LABORAL_DEFAULT;
+    if (!diaSeleccionado) {
+      return {
+        horarioTexto: `${cfg.semanal.horaEntrada} a ${cfg.semanal.horaSalida}`,
+        toleranciaTexto: `${cfg.semanal.toleranciaEntradaMinutos} min`,
+      };
+    }
+    const reg = evaluarConfiguracionPorDiaSemana(diaSeleccionado.diaSemana, cfg);
+    if (reg.esDescanso) {
+      return {
+        horarioTexto: "Descanso LFT",
+        toleranciaTexto: `${reg.toleranciaMinutos} min`,
+      };
+    }
+    return {
+      horarioTexto: `${reg.horaEntrada} a ${reg.horaSalida}`,
+      toleranciaTexto: `${reg.toleranciaMinutos} min`,
+    };
+  }, [diaSeleccionado, datos.horarioLaboralConfig]);
 
   // Primer día de la semana del mes para el offset en la cuadrícula (0 = Domingo)
   const primerDiaSemanaMes = datos.diasCalendario.length > 0 ? datos.diasCalendario[0].diaSemana : 0;
   // Offset lunes-inicio: Domingo=6, Lunes=0, Martes=1, etc.
   const offsetLunesInicio = (primerDiaSemanaMes + 6) % 7;
 
-  // Gauge circular de HOY
+  // Gauge circular de HOY con animación suave de entrada
   const radioCirculo = 42;
   const circunferenciaCirculo = 2 * Math.PI * radioCirculo;
-  const strokeOffset =
-    circunferenciaCirculo - (datos.hoy.porcentajeJornada / 100) * circunferenciaCirculo;
+  const strokeOffset = anilloHoyMontado
+    ? circunferenciaCirculo - (datos.hoy.porcentajeJornada / 100) * circunferenciaCirculo
+    : circunferenciaCirculo;
 
   // Extracción de eventos clave de Entrada y Salida para el Google Map del día seleccionado
   const eventoEntrada = diaSeleccionado?.eventos.find((e) => e.tipo === "ENTRADA");
@@ -559,19 +684,20 @@ export function DashboardJornadaVista({ datosIniciales }: DashboardJornadaVistaP
       </div>
 
       {/* =========================================================================
-          2. ESTRUCTURA DINÁMICA:
-             - SI EL DETALLE ESTÁ CERRADO: CALENDARIO TIENE ESPACIO MÁXIMO VISIBLE (col-span-8 o 9)
-             - SI EL DETALLE ESTÁ ABIERTO: SE DESPLIEGA EN COLUMNA DERECHA PROFESIONAL (col-span-4)
+          2. ESTRUCTURA PRINCIPAL CON EFECTO DE PROFUNDIDAD Y ATENUACIÓN SUAVE
+             CUANDO EL PANEL LATERAL INTERACTIVO ESTÁ ACTIVO
          ========================================================================= */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div
+        className={`grid grid-cols-1 lg:grid-cols-12 gap-6 items-start transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+          mostrarPanelDetalle
+            ? "lg:opacity-80 lg:brightness-[0.97] lg:scale-[0.996]"
+            : "opacity-100 scale-100"
+        }`}
+      >
         {/* =====================================================================
             COLUMNA IZQUIERDA: TARJETA "HOY" + RESUMEN MENSUAL
            ===================================================================== */}
-        <div
-          className={`${
-            mostrarPanelDetalle ? "lg:col-span-3" : "lg:col-span-4"
-          } space-y-5 transition-all duration-200`}
-        >
+        <div className="lg:col-span-4 space-y-5 transition-all duration-300">
           {/* Tarjeta HOY — EN JORNADA */}
           <Card className="rounded-3xl border-zinc-200 shadow-2xs overflow-hidden bg-white">
             <CardContent className="p-5 space-y-4">
@@ -774,8 +900,21 @@ export function DashboardJornadaVista({ datosIniciales }: DashboardJornadaVistaP
                     </div>
                   </div>
 
-                  {/* Barra de Puntualidad */}
-                  <div className="space-y-1.5 pt-2 border-t border-zinc-100">
+                  {/* Indicadores segmentados + Barra de Puntualidad */}
+                  <div className="space-y-2 pt-2 border-t border-zinc-100">
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <div className="h-1.5 rounded-full bg-emerald-500/80 transition-all duration-500" />
+                      <div
+                        className={`h-1.5 rounded-full transition-all duration-500 ${
+                          datos.resumenMes.totalRetardos > 0 ? "bg-amber-400" : "bg-emerald-500/50"
+                        }`}
+                      />
+                      <div
+                        className={`h-1.5 rounded-full transition-all duration-500 ${
+                          datos.resumenMes.totalFaltas > 0 ? "bg-rose-400" : "bg-zinc-200"
+                        }`}
+                      />
+                    </div>
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-[11px] font-semibold text-zinc-600">Puntualidad</span>
                       <span className="font-bold text-emerald-800">
@@ -784,7 +923,7 @@ export function DashboardJornadaVista({ datosIniciales }: DashboardJornadaVistaP
                     </div>
                     <div className="h-2 w-full rounded-full bg-zinc-100 overflow-hidden">
                       <div
-                        className="h-full bg-emerald-600 rounded-full transition-all duration-700"
+                        className="h-full bg-emerald-600 rounded-full transition-all duration-700 ease-out"
                         style={{ width: `${datos.resumenMes.porcentajePuntualidad}%` }}
                       />
                     </div>
@@ -831,13 +970,8 @@ export function DashboardJornadaVista({ datosIniciales }: DashboardJornadaVistaP
 
         {/* =====================================================================
             COLUMNA CENTRAL: VISTAS ESTILO GOOGLE CALENDAR (MES, SEMANA, QUINCENA, LISTA)
-            (SE EXPANDE A col-span-8 O col-span-9 CUANDO EL DETALLE ESTÁ CERRADO)
            ===================================================================== */}
-        <div
-          className={`${
-            mostrarPanelDetalle ? "lg:col-span-5" : "lg:col-span-8"
-          } space-y-4 transition-all duration-200`}
-        >
+        <div className="lg:col-span-8 space-y-4 transition-all duration-300">
           <Card className="rounded-3xl border-zinc-200 shadow-2xs overflow-hidden bg-white">
             <CardContent className="p-5 sm:p-6 space-y-5">
               {/* Cabecera Estilo Google Calendar: Botón "Hoy", Flechas < y >, y Título del Período */}
@@ -939,7 +1073,7 @@ export function DashboardJornadaVista({ datosIniciales }: DashboardJornadaVistaP
                   {Array.from({ length: offsetLunesInicio }).map((_, idx) => (
                     <div
                       key={`empty-${idx}`}
-                      className={`${mostrarPanelDetalle ? "h-14" : "h-16"} rounded-2xl opacity-10 bg-zinc-100`}
+                      className="h-14 sm:h-16 rounded-2xl opacity-10 bg-zinc-100"
                     />
                   ))}
 
@@ -960,16 +1094,14 @@ export function DashboardJornadaVista({ datosIniciales }: DashboardJornadaVistaP
                         key={dia.fecha}
                         type="button"
                         onClick={() => handleSeleccionarDia(dia)}
-                        className={`group rounded-2xl p-1.5 flex flex-col items-center justify-between transition-all relative cursor-pointer ${
-                          mostrarPanelDetalle ? "h-14" : "h-16"
-                        } ${
+                        className={`group h-14 sm:h-16 rounded-2xl p-2 flex flex-col items-center justify-between transition-all duration-200 ease-out relative cursor-pointer ${
                           estaSeleccionado
-                            ? "bg-zinc-950 text-white shadow-lg ring-2 ring-emerald-500 scale-105 z-10"
+                            ? "bg-zinc-950 text-white shadow-lg ring-2 ring-emerald-500 scale-[1.03] z-10"
                             : dia.esHoy
-                            ? "bg-blue-50 text-blue-900 border-2 border-blue-400 font-bold"
+                            ? "bg-blue-50 text-blue-900 border-2 border-blue-400 font-bold hover:-translate-y-0.5"
                             : dia.esDescanso
                             ? "text-zinc-300 hover:bg-zinc-50"
-                            : "text-zinc-800 hover:bg-zinc-100 hover:border-zinc-300 border border-zinc-100"
+                            : "bg-zinc-50/70 text-zinc-800 hover:bg-zinc-100 hover:border-zinc-300 hover:-translate-y-0.5 border border-zinc-100"
                         }`}
                       >
                         <div className="flex items-center justify-between w-full px-1">
@@ -984,9 +1116,9 @@ export function DashboardJornadaVista({ datosIniciales }: DashboardJornadaVistaP
                         </div>
 
                         <span
-                          className={`h-1.5 rounded-full transition-all ${
-                            mostrarPanelDetalle ? "w-4" : "w-6"
-                          } ${estaSeleccionado ? "bg-emerald-400" : barraBg}`}
+                          className={`h-1.5 w-6 rounded-full transition-all duration-300 ${
+                            estaSeleccionado ? "bg-emerald-400 w-7" : barraBg
+                          }`}
                         />
                       </button>
                     );
@@ -1415,212 +1547,356 @@ export function DashboardJornadaVista({ datosIniciales }: DashboardJornadaVistaP
           </Card>
         </div>
 
-        {/* =====================================================================
-            COLUMNA DERECHA: EXPEDIENTE DE DETALLE DEL DÍA
-            (SOLO SE DESPLIEGA AL HACER CLIC EN UNA FECHA)
-           ===================================================================== */}
-        {mostrarPanelDetalle && diaSeleccionado && (
-          <div className="lg:col-span-4 space-y-4 animate-in slide-in-from-right-4 fade-in duration-200">
-            <Card className="rounded-3xl border-zinc-200 shadow-xl overflow-hidden bg-white">
-              <CardContent className="p-5 sm:p-6 space-y-5">
-                {/* Cabecera del Panel de Detalle con Botón Cerrar */}
-                <div className="flex items-center justify-between pb-3 border-b border-zinc-100">
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block">
-                      Expediente de Asistencia
-                    </span>
-                    <h3 className="text-sm font-bold text-zinc-900">
-                      {new Date(diaSeleccionado.fecha + "T12:00:00.000Z").toLocaleDateString(
-                        "es-MX",
-                        {
-                          weekday: "long",
-                          day: "numeric",
-                          month: "long",
-                        }
-                      )}
-                    </h3>
-                  </div>
+      </div>
 
-                  <div className="flex items-center gap-1.5">
-                    <Badge
-                      variant="outline"
-                      className={`text-[10px] font-bold ${
-                        diaSeleccionado.estado === "RETARDO"
-                          ? "bg-amber-50 text-amber-800 border-amber-200"
-                          : diaSeleccionado.estado === "A_TIEMPO"
-                          ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                          : diaSeleccionado.estado === "FALTA"
-                          ? "bg-rose-50 text-rose-800 border-rose-200"
-                          : "bg-zinc-100 text-zinc-700"
-                      }`}
-                    >
-                      {diaSeleccionado.badgeTexto}
-                    </Badge>
-                    <button
-                      type="button"
-                      onClick={handleCerrarDetalle}
-                      className="p-1.5 rounded-xl text-zinc-400 hover:text-zinc-800 hover:bg-zinc-100 transition-colors cursor-pointer"
-                      title="Cerrar y expandir vista"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
+      {/* =========================================================================
+          2.5. CAPA DE ATENUACIÓN Y PANEL LATERAL DESLIZANTE (SLIDE-OVER DERECHO)
+               CON ANIMACIÓN ESCALONADA Y CONTADOR FLUIDO DE TIEMPO TRABAJADO
+         ========================================================================= */}
+      {/* Backdrop de atenuación suave (en móvil cierra al tocar; en escritorio permite seguir haciendo clic en días del calendario) */}
+      <div
+        onClick={handleCerrarDetalle}
+        aria-hidden="true"
+        className={`fixed inset-0 z-30 bg-zinc-950/20 backdrop-blur-[1px] transition-opacity duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] lg:pointer-events-none ${
+          mostrarPanelDetalle && diaSeleccionado
+            ? "opacity-100 pointer-events-auto"
+            : "opacity-0 pointer-events-none"
+        }`}
+      />
+
+      {/* Panel Lateral Deslizante desde el extremo derecho */}
+      <aside
+        aria-label="Expediente diario de asistencia"
+        aria-hidden={!mostrarPanelDetalle}
+        className={`fixed top-0 right-0 bottom-0 z-40 w-full sm:w-[410px] md:w-[435px] bg-white border-l border-zinc-200/90 shadow-[-24px_0_60px_-12px_rgba(24,24,27,0.22)] flex flex-col transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+          mostrarPanelDetalle && diaSeleccionado
+            ? "translate-x-0"
+            : "translate-x-full pointer-events-none"
+        }`}
+      >
+        {diaSeleccionado && (
+          <>
+            {/* 1. Cabecera Interactiva del Panel (< | DÍA / Fecha | > | ×) */}
+            <div className="px-5 py-4 border-b border-zinc-100 flex items-center justify-between gap-2 bg-white shrink-0 pt-safe">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => navegarDiaDetalle(-1)}
+                  disabled={diaSeleccionado.numeroDia <= 1}
+                  title="Día anterior"
+                  className="h-8 w-8 rounded-xl border border-zinc-200/80 bg-zinc-50/70 hover:bg-zinc-100 disabled:opacity-35 flex items-center justify-center text-zinc-700 transition-all cursor-pointer shrink-0"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+
+                <div className="min-w-0">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 block leading-none">
+                    {new Date(diaSeleccionado.fecha + "T12:00:00.000Z").toLocaleDateString(
+                      "es-MX",
+                      { weekday: "long" }
+                    )}
+                  </span>
+                  <h3 className="text-sm font-extrabold text-zinc-900 truncate mt-0.5 capitalize">
+                    {new Date(diaSeleccionado.fecha + "T12:00:00.000Z").toLocaleDateString(
+                      "es-MX",
+                      { day: "numeric", month: "long" }
+                    )}
+                  </h3>
                 </div>
+              </div>
 
-                {/* Banner Ejecutivo con Tiempo Efectivo */}
-                <div className="p-4 rounded-3xl bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 text-white space-y-2.5 shadow-md border border-zinc-800">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400">
-                      Tiempo Efectivo Computado
-                    </span>
-                    <span className="text-[10px] text-zinc-400">LFT Art. 132</span>
-                  </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => navegarDiaDetalle(1)}
+                  disabled={diaSeleccionado.numeroDia >= datos.diasCalendario.length}
+                  title="Día siguiente"
+                  className="h-8 w-8 rounded-xl border border-zinc-200/80 bg-zinc-50/70 hover:bg-zinc-100 disabled:opacity-35 flex items-center justify-center text-zinc-700 transition-all cursor-pointer"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
 
-                  <div className="flex items-baseline justify-between">
-                    <p className="text-2xl font-black tracking-tight text-white">
-                      {diaSeleccionado.horasTrabajadasStr}
+                <button
+                  type="button"
+                  onClick={handleCerrarDetalle}
+                  title="Cerrar panel (Esc)"
+                  className="h-8 w-8 rounded-xl border border-zinc-200/80 bg-zinc-50/70 hover:bg-zinc-900 hover:text-white hover:border-zinc-900 flex items-center justify-center text-zinc-500 transition-all cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Cuerpo Desplazable con Animaciones Progresivas */}
+            <div
+              key={`panel-body-${animKey}`}
+              className="flex-1 overflow-y-auto px-5 py-4 space-y-5 touch-scroll"
+            >
+              {/* 2. Tarjeta Hero Ejecutiva con Contador Progresivo y Barra de Progreso */}
+              <div
+                style={{ animationDelay: "30ms" }}
+                className="animate-nolan-stagger p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 text-white shadow-lg border border-zinc-800/90 relative overflow-hidden"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  {/* Columna Izquierda Hero: Badge de Estado + Contador Animado + Barra */}
+                  <div className="space-y-2.5 min-w-0">
+                    <div>
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider ${
+                          diaSeleccionado.estado === "RETARDO"
+                            ? "bg-amber-400/20 text-amber-300 border border-amber-400/30"
+                            : diaSeleccionado.estado === "A_TIEMPO" ||
+                              diaSeleccionado.estado === "EN_CURSO"
+                            ? "bg-emerald-400/20 text-emerald-300 border border-emerald-400/30"
+                            : diaSeleccionado.estado === "FALTA"
+                            ? "bg-rose-400/20 text-rose-300 border border-rose-400/30"
+                            : "bg-zinc-800 text-zinc-300 border border-zinc-700"
+                        }`}
+                      >
+                        {diaSeleccionado.estado === "RETARDO"
+                          ? `RETARDO ${diaSeleccionado.minutosRetardo} MIN`
+                          : diaSeleccionado.badgeTexto.toUpperCase()}
+                      </span>
+                    </div>
+
+                    <p className="text-2xl sm:text-[28px] font-black tracking-tight text-white tabular-nums leading-none">
+                      {horasTrabajadasAnimadasStr}
                     </p>
-                    <span className="text-xs text-zinc-400 font-mono">
-                      Jornada diaria: 8h
-                    </span>
+
+                    {/* Barra de progreso horizontal animada */}
+                    <div className="h-1.5 w-36 sm:w-44 rounded-full bg-zinc-800 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-700 ease-out ${
+                          diaSeleccionado.estado === "RETARDO"
+                            ? "bg-amber-400"
+                            : "bg-emerald-400"
+                        }`}
+                        style={{ width: `${progresoBarraDetalle}%` }}
+                      />
+                    </div>
                   </div>
 
-                  <div className="pt-2 border-t border-zinc-800/80 flex items-center justify-between text-[11px] text-zinc-300">
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-full bg-emerald-400 inline-block" />
-                      <span>Entrada: <strong>{diaSeleccionado.entradaHora || "--:--"}</strong></span>
+                  {/* Columna Derecha Hero: ENTRADA y SALIDA */}
+                  <div className="text-right space-y-2 shrink-0">
+                    <div>
+                      <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400 block">
+                        ENTRADA
+                      </span>
+                      <span className="text-sm font-mono font-extrabold text-white block leading-tight">
+                        {diaSeleccionado.entradaHora || "--:--"}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-full bg-rose-400 inline-block" />
-                      <span>Salida: <strong>{diaSeleccionado.salidaHora || "--:--"}</strong></span>
+
+                    <div>
+                      <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400 block">
+                        SALIDA
+                      </span>
+                      <span className="text-sm font-mono font-extrabold text-white block leading-tight">
+                        {diaSeleccionado.salidaHora || "--:--"}
+                      </span>
                     </div>
                   </div>
                 </div>
+              </div>
 
-                {/* =============================================================
-                    MAPA OFICIAL DE GOOGLE MAPS (SIN GEOCERCA)
-                   ============================================================= */}
+              {/* 3. Mapa Oficial de Google Maps con Aparición Progresiva */}
+              <div
+                style={{ animationDelay: "110ms" }}
+                className="animate-nolan-stagger"
+              >
                 <GoogleMapMarcajes
                   eventoEntrada={eventoEntrada}
                   eventoSalida={eventoSalida}
                   configTaller={datos.configuracionTaller}
                 />
+              </div>
 
-                {/* =============================================================
-                    CRONOLOGÍA FORENSE DE MARCAJES CON EVIDENCIA & FACE ID
-                   ============================================================= */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-zinc-900">
-                      Cronología de Registros ({diaSeleccionado.eventos.length})
-                    </span>
-                    <span className="text-[10px] text-zinc-400 font-mono">
-                      Certificación LFT
-                    </span>
+              {/* 4. Cronología Escalonada de Registros ("Tus registros" + X guardados) */}
+              <div className="space-y-3 pt-1">
+                <div
+                  style={{ animationDelay: "170ms" }}
+                  className="animate-nolan-stagger flex items-center justify-between"
+                >
+                  <span className="text-xs font-extrabold text-zinc-900">
+                    Tus registros
+                  </span>
+                  <span className="text-[11px] font-medium text-zinc-400">
+                    {diaSeleccionado.eventos.length}{" "}
+                    {diaSeleccionado.eventos.length === 1 ? "guardado" : "guardados"}
+                  </span>
+                </div>
+
+                {diaSeleccionado.eventos.length === 0 ? (
+                  <div
+                    style={{ animationDelay: "220ms" }}
+                    className="animate-nolan-stagger py-8 text-center text-zinc-400 text-xs bg-zinc-50/80 rounded-2xl border border-dashed border-zinc-200"
+                  >
+                    No se registran eventos de asistencia en esta fecha.
                   </div>
+                ) : (
+                  <div className="relative pt-1">
+                    {diaSeleccionado.eventos.map((ev, idx) => {
+                      const esUltimo = idx === diaSeleccionado.eventos.length - 1;
+                      const delayBadge = 200 + idx * 115;
+                      const delayContent = 220 + idx * 115;
+                      const delayConnector = 260 + idx * 115;
 
-                  {diaSeleccionado.eventos.length === 0 ? (
-                    <div className="py-8 text-center text-zinc-400 text-xs bg-zinc-50 rounded-2xl border border-dashed border-zinc-200">
-                      No se registran eventos de asistencia en esta fecha.
-                    </div>
-                  ) : (
-                    <div className="space-y-2.5">
-                      {diaSeleccionado.eventos.map((ev) => (
-                        <div
-                          key={ev.numero}
-                          className="p-3 rounded-2xl border border-zinc-200/90 bg-white hover:border-zinc-300 transition-all shadow-2xs space-y-2"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <div className="h-6 w-6 rounded-lg bg-zinc-900 text-white flex items-center justify-center text-xs font-bold shrink-0">
-                                {ev.numero}
-                              </div>
-                              <div>
-                                <span className="text-xs font-bold text-zinc-900">
-                                  {ev.tipo === "ENTRADA"
-                                    ? "Entrada a Turno"
-                                    : ev.tipo === "INICIO_DESCANSO"
-                                    ? "Salida a Comer / Descanso"
-                                    : ev.tipo === "FIN_DESCANSO"
-                                    ? "Regreso de Descanso"
-                                    : "Salida de Jornada"}
-                                </span>
-                                <span className="text-[10px] text-zinc-400 font-mono block">
-                                  {ev.horaConSegundos || `${ev.hora}:00`} hrs
-                                </span>
-                              </div>
-                            </div>
+                      const verboEvento =
+                        ev.tipo === "ENTRADA"
+                          ? "Entraste"
+                          : ev.tipo === "INICIO_DESCANSO"
+                          ? "Saliste a descanso"
+                          : ev.tipo === "FIN_DESCANSO"
+                          ? "Regresaste"
+                          : "Saliste";
 
-                            {/* Badge de Método de Marcaje */}
-                            <Badge
-                              variant="outline"
-                              className="text-[9px] font-semibold bg-zinc-50 border-zinc-200 text-zinc-700"
+                      const badgeColorClass =
+                        ev.tipo === "ENTRADA"
+                          ? "bg-emerald-600 text-white shadow-emerald-600/20"
+                          : ev.tipo === "INICIO_DESCANSO"
+                          ? "bg-zinc-800 text-white shadow-zinc-800/20"
+                          : ev.tipo === "FIN_DESCANSO"
+                          ? "bg-emerald-500 text-white shadow-emerald-500/20"
+                          : "bg-zinc-950 text-white shadow-zinc-950/20";
+
+                      return (
+                        <div key={ev.numero} className="relative flex items-start gap-3.5">
+                          {/* Columna Izquierda: Círculo Numerado + Línea Vertical Conectora */}
+                          <div className="flex flex-col items-center shrink-0">
+                            <div
+                              style={{ animationDelay: `${delayBadge}ms` }}
+                              className={`animate-nolan-pop h-7 w-7 rounded-full flex items-center justify-center text-xs font-extrabold shadow-md ${badgeColorClass}`}
                             >
-                              {ev.metodoRegistro === "WEB" ? "Web Móvil (GPS)" : "Checador ZKTeco"}
-                            </Badge>
-                          </div>
-
-                          {/* Subtexto y Retardo */}
-                          <div className="flex flex-wrap items-center gap-2 text-[10px]">
-                            {ev.esRetardo && (
-                              <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-bold">
-                                Retardo {ev.minutosRetardo} min
-                              </span>
-                            )}
-                            <span className="text-zinc-600 inline-flex items-center gap-1">
-                              <MapPin className="h-3 w-3 text-emerald-600" />
-                              {ev.subtexto}
-                            </span>
-                          </div>
-
-                          {/* Sección de Biometría Face ID y Evidencia Fotográfica */}
-                          <div className="pt-2 border-t border-zinc-100 flex items-center justify-between">
-                            <div className="flex items-center gap-1 text-[10px] text-zinc-500">
-                              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-                              <span>
-                                {ev.validacionIdentidad === "FACE_ID_BIOMETRICO_VERIFICADO"
-                                  ? `Face ID Verificado (${ev.similitudFacial || 92}%)`
-                                  : "Firma Criptográfica SHA-256"}
-                              </span>
+                              {ev.numero}
                             </div>
 
-                            {ev.fotoUrl ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setFotoModal({
-                                    url: ev.fotoUrl!,
-                                    titulo: `${ev.tipo} — ${ev.hora}`,
-                                    hora: ev.horaConSegundos || ev.hora,
-                                    lugar: ev.lugarAutorizado || datos.configuracionTaller.nombreTaller,
-                                    similitudFacial: ev.similitudFacial,
-                                    validacion: ev.validacionIdentidad,
-                                  })
-                                }
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-[10px] transition-colors cursor-pointer border border-blue-200/60"
+                            {!esUltimo && (
+                              <div
+                                style={{ animationDelay: `${delayConnector}ms` }}
+                                className="animate-nolan-connector flex flex-col items-center my-1"
                               >
-                                <Camera className="h-3 w-3" />
-                                <span>Ver Evidencia</span>
-                              </button>
-                            ) : (
-                              <span className="text-[10px] text-zinc-400">Sin foto</span>
+                                <span className="h-1.5 w-1.5 rounded-full bg-zinc-300 mb-1" />
+                                <div className="w-[1.5px] h-8 bg-zinc-200" />
+                              </div>
                             )}
+                          </div>
+
+                          {/* Columna Central: Hora, Acción y Píldoras de Estado */}
+                          <div
+                            style={{ animationDelay: `${delayContent}ms` }}
+                            className={`animate-nolan-stagger flex-1 min-w-0 ${
+                              esUltimo ? "pb-2" : "pb-4"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <div className="flex items-baseline gap-1.5">
+                                  <span className="text-sm font-black text-zinc-900 font-mono tracking-tight">
+                                    {ev.hora}
+                                  </span>
+                                  <span className="text-xs font-bold text-zinc-700">
+                                    {verboEvento}
+                                  </span>
+                                </div>
+
+                                {/* Píldoras de Estado (Retardo, Zona GPS y Face ID) */}
+                                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                  {ev.esRetardo && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200/80 text-[10px] font-bold">
+                                      Llegaste {ev.minutosRetardo} min tarde
+                                    </span>
+                                  )}
+
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border ${
+                                      ev.enGeocerca
+                                        ? "bg-emerald-50/90 text-emerald-800 border-emerald-200/70"
+                                        : "bg-amber-50 text-amber-800 border-amber-200"
+                                    }`}
+                                  >
+                                    <MapPin className="h-2.5 w-2.5 text-emerald-600 shrink-0" />
+                                    {ev.enGeocerca
+                                      ? "Dentro de tu zona"
+                                      : `Fuera de zona (${ev.distanciaMetros}m)`}
+                                  </span>
+
+                                  {ev.validacionIdentidad === "FACE_ID_BIOMETRICO_VERIFICADO" && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-100 text-zinc-700 border border-zinc-200 text-[9px] font-semibold">
+                                      <ShieldCheck className="h-2.5 w-2.5 text-emerald-600" />
+                                      Face ID {ev.similitudFacial || 92}%
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Botón derecho de Evidencia / Cámara (como el icono derecho en el video) */}
+                              <div className="flex items-center gap-1 shrink-0">
+                                {ev.fotoUrl ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setFotoModal({
+                                        url: ev.fotoUrl!,
+                                        titulo: `${ev.tipo} — ${ev.hora}`,
+                                        hora: ev.horaConSegundos || ev.hora,
+                                        lugar:
+                                          ev.lugarAutorizado ||
+                                          datos.configuracionTaller.nombreTaller,
+                                        similitudFacial: ev.similitudFacial,
+                                        validacion: ev.validacionIdentidad,
+                                      })
+                                    }
+                                    title="Ver evidencia fotográfica y firma biométrica"
+                                    className="h-8 w-8 rounded-xl bg-zinc-100 hover:bg-zinc-900 text-zinc-700 hover:text-white border border-zinc-200/80 flex items-center justify-center transition-all cursor-pointer shadow-2xs"
+                                  >
+                                    <Camera className="h-3.5 w-3.5" />
+                                  </button>
+                                ) : (
+                                  <div
+                                    title={
+                                      ev.metodoRegistro === "WEB"
+                                        ? "Marcaje Web GPS"
+                                        : "Checador ZKTeco"
+                                    }
+                                    className="h-7 w-7 rounded-xl bg-zinc-50 text-zinc-400 border border-zinc-200/60 flex items-center justify-center"
+                                  >
+                                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
 
-                {/* Footer del Detalle con Ley Federal del Trabajo */}
-                <div className="pt-2 border-t border-zinc-100 text-[10px] text-zinc-400 text-center leading-relaxed">
-                  Certificación de jornada laboral con sellado biométrico y georreferencia inalterable.
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+            {/* 5. Pie Fijo del Panel ("TU HORARIO" | "TOLERANCIA") idéntico al video */}
+            <div className="border-t border-zinc-200/80 bg-[#FAF9F6] px-5 py-3.5 grid grid-cols-2 divide-x divide-zinc-200/80 shrink-0 pb-safe">
+              <div className="pr-3">
+                <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400 block">
+                  TU HORARIO
+                </span>
+                <span className="text-xs font-extrabold text-zinc-900 font-mono block mt-0.5">
+                  {regimenDiaSeleccionado.horarioTexto}
+                </span>
+              </div>
+
+              <div className="pl-4">
+                <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400 block">
+                  TOLERANCIA
+                </span>
+                <span className="text-xs font-extrabold text-zinc-900 font-mono block mt-0.5">
+                  {regimenDiaSeleccionado.toleranciaTexto}
+                </span>
+              </div>
+            </div>
+          </>
         )}
-      </div>
+      </aside>
 
       {/* =========================================================================
           3. MODAL DE EVIDENCIA FOTOGRÁFICA Y AUDITORÍA FORENSE
