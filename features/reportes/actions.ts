@@ -54,8 +54,9 @@ export async function obtenerReporteInspeccionSTPS(filtros: {
   fechaInicio: string;
   fechaFin: string;
   empleadoId?: string;
+  empleadosIds?: string[];
 }): Promise<RespuestaReporteInspeccion> {
-  const { fechaInicio, fechaFin, empleadoId } = filtros;
+  const { fechaInicio, fechaFin, empleadoId, empleadosIds } = filtros;
   const adminClient = createAdminClient();
 
   try {
@@ -63,7 +64,9 @@ export async function obtenerReporteInspeccionSTPS(filtros: {
 
     // 1. Obtener empleados
     let empQuery = adminClient.from("empleados").select("*").eq("activo", true);
-    if (empleadoId && empleadoId !== "todos") {
+    if (empleadosIds && empleadosIds.length > 0 && !empleadosIds.includes("todos")) {
+      empQuery = empQuery.in("id", empleadosIds);
+    } else if (empleadoId && empleadoId !== "todos") {
       empQuery = empQuery.eq("id", empleadoId);
     }
     const { data: empleados, error: empError } = await empQuery.order("apellidos", { ascending: true });
@@ -223,6 +226,7 @@ export async function generarExcelReporteAsistencias(filtros: {
   fechaInicio: string;
   fechaFin: string;
   empleadoId?: string;
+  empleadosIds?: string[];
 }): Promise<RespuestaExportacionExcel> {
   try {
     const { fechaInicio, fechaFin } = filtros;

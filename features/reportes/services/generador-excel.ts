@@ -413,30 +413,39 @@ export async function generarLibroExcelAsistencias(datos: DatosReporteExcel): Pr
     cell.alignment = { vertical: "middle", horizontal: "right" };
   }
 
-  // Bloque Legal de Firmas
-  const filaFirma = filaTotales + 3;
-  wsAsis.mergeCells(`C${filaFirma}:G${filaFirma}`);
-  const f1 = wsAsis.getCell(`C${filaFirma}`);
-  f1.value = "_____________________________________________";
-  f1.alignment = { vertical: "bottom", horizontal: "center" };
+  // Bloque Legal de Firmas (Solo si se eligen 1 o 2 empleados; si son más de 2 se omite conforme a la regla ejecutiva)
+  const totalEmpleados = datos.reportesEmpleados.length;
+  const incluirFirmas = totalEmpleados > 0 && totalEmpleados <= 2;
 
-  wsAsis.mergeCells(`L${filaFirma}:P${filaFirma}`);
-  const f2 = wsAsis.getCell(`L${filaFirma}`);
-  f2.value = "_____________________________________________";
-  f2.alignment = { vertical: "bottom", horizontal: "center" };
+  if (incluirFirmas) {
+    const filaFirma = filaTotales + 3;
+    wsAsis.mergeCells(`C${filaFirma}:G${filaFirma}`);
+    const f1 = wsAsis.getCell(`C${filaFirma}`);
+    f1.value = "_____________________________________________";
+    f1.alignment = { vertical: "bottom", horizontal: "center" };
 
-  const filaTextoFirma = filaFirma + 1;
-  wsAsis.mergeCells(`C${filaTextoFirma}:G${filaTextoFirma}`);
-  const tf1 = wsAsis.getCell(`C${filaTextoFirma}`);
-  tf1.value = "Firma de Conformidad del Trabajador";
-  tf1.font = { name: "Segoe UI", size: 8.5, bold: true, color: { argb: PALETA.textDark } };
-  tf1.alignment = { vertical: "top", horizontal: "center" };
+    wsAsis.mergeCells(`L${filaFirma}:P${filaFirma}`);
+    const f2 = wsAsis.getCell(`L${filaFirma}`);
+    f2.value = "_____________________________________________";
+    f2.alignment = { vertical: "bottom", horizontal: "center" };
 
-  wsAsis.mergeCells(`L${filaTextoFirma}:P${filaTextoFirma}`);
-  const tf2 = wsAsis.getCell(`L${filaTextoFirma}`);
-  tf2.value = `Firma y Sello del Patrón (${datos.taller.nombre})`;
-  tf2.font = { name: "Segoe UI", size: 8.5, bold: true, color: { argb: PALETA.textDark } };
-  tf2.alignment = { vertical: "top", horizontal: "center" };
+    const filaTextoFirma = filaFirma + 1;
+    wsAsis.mergeCells(`C${filaTextoFirma}:G${filaTextoFirma}`);
+    const tf1 = wsAsis.getCell(`C${filaTextoFirma}`);
+    const etiquetaFirma =
+      totalEmpleados === 1
+        ? `Firma: ${datos.reportesEmpleados[0].empleado.nombre} ${datos.reportesEmpleados[0].empleado.apellidos}`
+        : "Firma de Conformidad del Trabajador";
+    tf1.value = etiquetaFirma;
+    tf1.font = { name: "Segoe UI", size: 8.5, bold: true, color: { argb: PALETA.textDark } };
+    tf1.alignment = { vertical: "top", horizontal: "center" };
+
+    wsAsis.mergeCells(`L${filaTextoFirma}:P${filaTextoFirma}`);
+    const tf2 = wsAsis.getCell(`L${filaTextoFirma}`);
+    tf2.value = `Firma y Sello del Patrón (${datos.taller.nombre})`;
+    tf2.font = { name: "Segoe UI", size: 8.5, bold: true, color: { argb: PALETA.textDark } };
+    tf2.alignment = { vertical: "top", horizontal: "center" };
+  }
 
   // =========================================================================
   // HOJA 2: EVIDENCIA DE MARCAJES

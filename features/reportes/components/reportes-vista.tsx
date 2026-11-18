@@ -44,9 +44,18 @@ export function ReportesVista({
   const [reporte, setReporte] = useState<RespuestaReporteInspeccion>(reporteInicial);
   const [fechaInicio, setFechaInicio] = useState(fechaInicioDefault);
   const [fechaFin, setFechaFin] = useState(fechaFinDefault);
-  const [empleadoId, setEmpleadoId] = useState("todos");
+  const [modoFiltroEmpleado, setModoFiltroEmpleado] = useState<"todos" | "especificos">("todos");
+  const [empleadosSeleccionados, setEmpleadosSeleccionados] = useState<string[]>([]);
   const [isPending, startTransition] = useTransition();
   const [isExportingExcel, setIsExportingExcel] = useState(false);
+
+  function obtenerNombreDia(fechaStr: string): string {
+    if (!fechaStr) return "";
+    const [y, m, d] = fechaStr.split("-").map(Number);
+    const fecha = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+    const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+    return dias[fecha.getUTCDay()] || "";
+  }
 
   function aplicarPeriodoRapido(tipo: "quincena_actual" | "mes_actual" | "quincena_anterior" | "mes_anterior") {
     const ahora = new Date();
@@ -68,11 +77,9 @@ export function ReportesVista({
     } else if (tipo === "quincena_anterior") {
       const dia = ahora.getDate();
       if (dia <= 15) {
-        // Segunda quincena del mes anterior
         ini = new Date(ahora.getFullYear(), ahora.getMonth() - 1, 16);
         fin = new Date(ahora.getFullYear(), ahora.getMonth(), 0);
       } else {
-        // Primera quincena del mes actual
         ini = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
         fin = new Date(ahora.getFullYear(), ahora.getMonth(), 15);
       }
@@ -85,15 +92,26 @@ export function ReportesVista({
     const finStr = fin.toISOString().slice(0, 10);
     setFechaInicio(iniStr);
     setFechaFin(finStr);
-    consultar(iniStr, finStr, empleadoId);
+    consultar(iniStr, finStr, modoFiltroEmpleado, empleadosSeleccionados);
   }
 
-  function consultar(ini: string, fn: string, emp: string) {
+  function consultar(
+    ini: string = fechaInicio,
+    fn: string = fechaFin,
+    modo: "todos" | "especificos" = modoFiltroEmpleado,
+    seleccionados: string[] = empleadosSeleccionados
+  ) {
+    if (modo === "especificos" && seleccionados.length === 0) {
+      notify.warning("Selección requerida", "Por favor selecciona al menos un empleado para el reporte.");
+      return;
+    }
+
     startTransition(async () => {
       const res = await obtenerReporteInspeccionSTPS({
         fechaInicio: ini,
         fechaFin: fn,
-        empleadoId: emp,
+        empleadoId: modo === "todos" ? "todos" : undefined,
+        empleadosIds: modo === "especificos" ? seleccionados : undefined,
       });
 
       if (res.success) {
@@ -105,12 +123,18 @@ export function ReportesVista({
   }
 
   async function handleExportarExcel() {
+    if (modoFiltroEmpleado === "especificos" && empleadosSeleccionados.length === 0) {
+      notify.warning("Selección requerida", "Por favor selecciona al menos un empleado para exportar.");
+      return;
+    }
+
     try {
       setIsExportingExcel(true);
       const res = await generarExcelReporteAsistencias({
         fechaInicio,
         fechaFin,
-        empleadoId,
+        empleadoId: modoFiltroEmpleado === "todos" ? "todos" : undefined,
+        empleadosIds: modoFiltroEmpleado === "especificos" ? empleadosSeleccionados : undefined,
       });
 
       if (!res.success || !res.base64) {
@@ -156,49 +180,84 @@ export function ReportesVista({
     }
   }
 
-  // Exportar a CSV con BOM UTF-8 para Excel
+  // Exportar a CSV estructurado con el mismo formato oficial (sin firmas)
   function exportarCSV() {
     if (!reporte.reportesEmpleados || reporte.reportesEmpleados.length === 0) {
       notify.warning("Sin datos", "No hay registros para exportar en este período.");
       return;
     }
 
+    const fechaEmision = new Date().toLocaleString("es-MX", {
+      timeZone: "America/Merida",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+
     const filas: string[] = [
-      `"REPORTE OFICIAL DE ASISTENCIA LFT - SERVICIO MECÁNICO LÓPEZ"`,
-      `"Período: ${reporte.fechaInicio} al ${reporte.fechaFin}"`,
-      `"Generado: ${new Date().toLocaleString("es-MX")}"`,
+      `"${(reporte.taller.nombre || "SERVICIO MECÁNICO LÓPEZ").toUpperCase()}"`,
+      `"NOLAN by WYLEN — REPORTE OFICIAL DE ASISTENCIAS Y CONTROL DE JORNADA"`,
+      `"Fundamento: Art. 132 Fracción XXXIV de la Ley Federal del Trabajo"`,
+      `"Período: ${reporte.fechaInicio} al ${reporte.fechaFin} | Emisión: ${fechaEmision} | Empleados: ${reporte.reportesEmpleados.length} | Jornadas: ${reporte.totalesGenerales.totalDias}"`,
       "",
-      `"No. Empleado","Nombre Completo","CURP","RFC","NSS","Puesto","Fecha","1. Entrada","2. Salida Comida","3. Regreso Comida","4. Salida Final","Horas Ordinarias","Horas Dobles","Horas Triples","Retardo (min)","Estado"`,
+      `"#","No. Empleado","Nombre del Trabajador","Puesto / Rol","CURP","RFC","NSS","Fecha","Día","1. Entrada","2. Salida Comida","3. Regreso Comida","4. Salida Final","Horas Ordinarias","Ext. Dobles","Ext. Triples","Retardo (min)","Estado Jornada","Método Registro","Evidencia Fotográfica"`,
     ];
 
+    let correlativo = 1;
     for (const r of reporte.reportesEmpleados) {
       for (const j of r.jornadas) {
-        const ent = j.entrada ? new Date(j.entrada.fechaHora).toLocaleTimeString("es-MX") : "";
-        const sc = j.inicioDescanso ? new Date(j.inicioDescanso.fechaHora).toLocaleTimeString("es-MX") : "";
-        const rc = j.finDescanso ? new Date(j.finDescanso.fechaHora).toLocaleTimeString("es-MX") : "";
-        const sal = j.salida ? new Date(j.salida.fechaHora).toLocaleTimeString("es-MX") : "";
+        const ent = formatearHora(j.entrada?.fechaHora);
+        const sc = formatearHora(j.inicioDescanso?.fechaHora);
+        const rc = formatearHora(j.finDescanso?.fechaHora);
+        const sal = formatearHora(j.salida?.fechaHora);
+
+        let metodoNombre = "—";
+        if (j.entrada?.metodoRegistro === "WEB") metodoNombre = "WEB (GPS / Selfie)";
+        else if (j.entrada?.metodoRegistro === "DISPOSITIVO") metodoNombre = "Biométrico Huella (MB10V)";
+        else if (j.entrada?.metodoRegistro === "MANUAL") metodoNombre = "Ajuste Manual";
+        else if (j.entrada?.metodoRegistro) metodoNombre = j.entrada.metodoRegistro;
+
+        let evidenciaTexto = "Sin Evidencia";
+        if (j.entrada?.fotoUrl) evidenciaTexto = "Disponible (Selfie)";
+        else if (j.entrada?.metodoRegistro === "DISPOSITIVO") evidenciaTexto = "Biometría Huella";
+
+        const diaSemana = obtenerNombreDia(j.fecha);
 
         filas.push(
-          `"${r.empleado.numero_empleado}","${r.empleado.nombre} ${r.empleado.apellidos}","${
-            r.empleado.curp || ""
-          }","${r.empleado.rfc || ""}","${r.empleado.nss || ""}","${r.empleado.puesto}","${
+          `"${correlativo}","${r.empleado.numero_empleado}","${r.empleado.nombre} ${r.empleado.apellidos}","${
+            r.empleado.puesto || "—"
+          }","${r.empleado.curp || "—"}","${r.empleado.rfc || "—"}","${r.empleado.nss || "—"}","${
             j.fecha
-          }","${ent}","${sc}","${rc}","${sal}","${j.horasOrdinarias}","${j.horasExtraDobles}","${
-            j.horasExtraTriples
-          }","${j.minutosRetardo}","${j.estadoJornada}"`
+          }","${diaSemana}","${ent}","${sc}","${rc}","${sal}","${j.horasOrdinarias.toFixed(2)}","${j.horasExtraDobles.toFixed(
+            2
+          )}","${j.horasExtraTriples.toFixed(2)}","${j.minutosRetardo}","${j.estadoJornada}","${metodoNombre}","${evidenciaTexto}"`
         );
+        correlativo++;
       }
     }
+
+    // Fila de totales generales
+    filas.push("");
+    filas.push(
+      `"TOTALES","","","","","","","","","","","","","${reporte.totalesGenerales.totalOrdinarias.toFixed(
+        2
+      )}","${reporte.totalesGenerales.totalDobles.toFixed(2)}","${reporte.totalesGenerales.totalTriples.toFixed(
+        2
+      )}","${reporte.totalesGenerales.totalRetardos}","","",""`
+    );
 
     const csvContent = "\uFEFF" + filas.join("\r\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `Reporte_Asistencias_LFT_${reporte.fechaInicio}_${reporte.fechaFin}.csv`;
+    link.download = `NOLAN_Reporte_Asistencias_${reporte.fechaInicio}_${reporte.fechaFin}.csv`;
     link.click();
     URL.revokeObjectURL(url);
-    notify.success("Descarga iniciada", "Archivo CSV generado correctamente para Excel.");
+    notify.success("Descarga CSV completada", "Archivo CSV generado con el formato oficial.");
   }
 
   function handleImprimir() {
@@ -308,29 +367,128 @@ export function ReportesVista({
               </div>
             </div>
 
-            {/* Empleado */}
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-zinc-700 block">Personal a Auditar</label>
-              <select
-                value={empleadoId}
-                onChange={(e) => setEmpleadoId(e.target.value)}
-                className="w-full rounded-xl border border-zinc-200 bg-white p-2 text-xs text-zinc-900 focus:outline-none focus:border-zinc-900"
-              >
-                <option value="todos">Todo el personal activo ({empleados.length})</option>
-                {empleados.map((emp) => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.numero_empleado} — {emp.nombre} {emp.apellidos}
-                  </option>
-                ))}
-              </select>
+            {/* Modalidad de Personal a Auditar */}
+            <div className="space-y-1.5 sm:col-span-3 pt-1 border-t border-zinc-100">
+              <label className="text-xs font-semibold text-zinc-800 block">Personal a Incluir en el Reporte</label>
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="flex items-center gap-2 text-xs font-medium text-zinc-800 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="modoPersonal"
+                    value="todos"
+                    checked={modoFiltroEmpleado === "todos"}
+                    onChange={() => {
+                      setModoFiltroEmpleado("todos");
+                      consultar(fechaInicio, fechaFin, "todos", []);
+                    }}
+                    className="h-3.5 w-3.5 text-zinc-900 focus:ring-zinc-900"
+                  />
+                  <span>Todo el personal activo ({empleados.length})</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs font-medium text-zinc-800 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="modoPersonal"
+                    value="especificos"
+                    checked={modoFiltroEmpleado === "especificos"}
+                    onChange={() => {
+                      setModoFiltroEmpleado("especificos");
+                    }}
+                    className="h-3.5 w-3.5 text-zinc-900 focus:ring-zinc-900"
+                  />
+                  <span>Elegir empleados para el reporte</span>
+                </label>
+              </div>
+
+              {/* Selector interactivo al elegir empleados específicos */}
+              {modoFiltroEmpleado === "especificos" && (
+                <div className="mt-2.5 rounded-2xl border border-zinc-200 bg-zinc-50/70 p-3 space-y-2.5 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-zinc-700">
+                      Selecciona los empleados a auditar:
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allIds = empleados.map((e) => e.id);
+                          setEmpleadosSeleccionados(allIds);
+                        }}
+                        className="text-[11px] text-blue-600 hover:text-blue-800 font-medium"
+                      >
+                        Marcar todos
+                      </button>
+                      <span className="text-zinc-300">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setEmpleadosSeleccionados([])}
+                        className="text-[11px] text-zinc-500 hover:text-zinc-700"
+                      >
+                        Limpiar
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1">
+                    {empleados.map((emp) => {
+                      const isChecked = empleadosSeleccionados.includes(emp.id);
+                      return (
+                        <label
+                          key={emp.id}
+                          className={`flex items-start gap-2 p-2 rounded-xl border text-xs cursor-pointer transition-colors ${
+                            isChecked
+                              ? "bg-blue-50/80 border-blue-300 text-blue-950 font-medium shadow-2xs"
+                              : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setEmpleadosSeleccionados((prev) => [...prev, emp.id]);
+                              } else {
+                                setEmpleadosSeleccionados((prev) => prev.filter((id) => id !== emp.id));
+                              }
+                            }}
+                            className="mt-0.5 h-3.5 w-3.5 rounded text-blue-600 focus:ring-blue-500"
+                          />
+                          <div className="leading-tight">
+                            <span className="font-semibold block text-zinc-900">{emp.nombre} {emp.apellidos}</span>
+                            <span className="text-[10px] text-zinc-500 font-mono">{emp.numero_empleado} • {emp.puesto}</span>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {/* Aviso dinámico de la regla ejecutiva de firmas */}
+                  <div className="pt-1.5 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-200/60 text-[11px]">
+                    <span className="text-zinc-600">
+                      Seleccionados: <strong>{empleadosSeleccionados.length}</strong> de {empleados.length}
+                    </span>
+                    {empleadosSeleccionados.length > 0 && (
+                      empleadosSeleccionados.length <= 2 ? (
+                        <span className="text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+                          ✓ Se incluirán firmas del trabajador y empleador (≤ 2 empleados)
+                        </span>
+                      ) : (
+                        <span className="text-zinc-600 font-medium bg-zinc-100 px-2 py-0.5 rounded-lg border border-zinc-200">
+                          ℹ Sin campos de firma (reporte consolidado de más de 2 empleados)
+                        </span>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
           <div className="flex justify-end pt-2 border-t border-zinc-100">
             <Button
               size="sm"
-              onClick={() => consultar(fechaInicio, fechaFin, empleadoId)}
-              disabled={isPending}
+              onClick={() => consultar(fechaInicio, fechaFin, modoFiltroEmpleado, empleadosSeleccionados)}
+              disabled={isPending || (modoFiltroEmpleado === "especificos" && empleadosSeleccionados.length === 0)}
               className="rounded-xl text-xs h-8 px-4"
             >
               {isPending ? (
@@ -521,21 +679,23 @@ export function ReportesVista({
                 </table>
               </div>
 
-              {/* Bloque Legal de Firmas para Constituir "Prueba Plena" ante la Autoridad (LFT Art. 132 fr. XXXIV) */}
-              <div className="pt-6 grid grid-cols-2 gap-8 text-center text-xs text-zinc-700">
-                <div className="space-y-1">
-                  <div className="border-b border-zinc-400 w-48 sm:w-64 mx-auto mb-1 h-12" />
-                  <p className="font-bold text-zinc-900">
-                    {item.empleado.nombre} {item.empleado.apellidos}
-                  </p>
-                  <p className="text-[10px] text-zinc-500">Firma de Conformidad del Trabajador</p>
+              {/* Bloque Legal de Firmas: solo si se eligen 1 o 2 empleados; si son más de 2 se omite conforme a la regla */}
+              {reporte.reportesEmpleados.length <= 2 && (
+                <div className="pt-6 grid grid-cols-2 gap-8 text-center text-xs text-zinc-700">
+                  <div className="space-y-1">
+                    <div className="border-b border-zinc-400 w-48 sm:w-64 mx-auto mb-1 h-12" />
+                    <p className="font-bold text-zinc-900">
+                      {item.empleado.nombre} {item.empleado.apellidos}
+                    </p>
+                    <p className="text-[10px] text-zinc-500">Firma de Conformidad del Trabajador</p>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="border-b border-zinc-400 w-48 sm:w-64 mx-auto mb-1 h-12" />
+                    <p className="font-bold text-zinc-900">{reporte.taller.nombre || "Servicio Mecánico López"}</p>
+                    <p className="text-[10px] text-zinc-500">Firma del Patrón / Representante Legal</p>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <div className="border-b border-zinc-400 w-48 sm:w-64 mx-auto mb-1 h-12" />
-                  <p className="font-bold text-zinc-900">Servicio Mecánico López</p>
-                  <p className="text-[10px] text-zinc-500">Firma del Patrón / Representante Legal</p>
-                </div>
-              </div>
+              )}
             </div>
           ))
         )}

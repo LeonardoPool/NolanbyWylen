@@ -295,5 +295,52 @@ test("Reporte Excel: Genera archivo .xlsx profesional con 3 hojas y datos 100% f
   assert.strictEqual(wsMod.getCell("G6").value, "JUSTIFICADA");
   assert.ok(String(wsMod.getCell("I6").value).includes("Falla eléctrica"));
 
-  console.log("✓ Test de Reporte Excel completado exitosamente: 3 hojas verificadas, 100% integridad de datos.");
+  // 7. Verificar que con 2 empleados SÍ se incluyen las firmas
+  const filaFirma = filaTotales + 3;
+  const textoFirma = wsAsis.getCell(`C${filaFirma + 1}`).value;
+  assert.ok(textoFirma && String(textoFirma).includes("Firma"), "Con <= 2 empleados debe incluirse el bloque de firmas");
+
+  console.log("✓ Test de Reporte Excel con 2 empleados: firmas verificadas correctamente.");
+});
+
+test("Regla de Firmas: Si se eligen más de 2 empleados, se omite el bloque de firmas", async () => {
+  const datosMock3: DatosReporteExcel = {
+    taller: { nombre: "Servicio Mecánico López", direccion: "Mérida, Yucatán" },
+    fechaInicio: "2026-11-01",
+    fechaFin: "2026-11-15",
+    fechaEmision: "18/11/2026 10:30",
+    totalesGenerales: { totalDias: 3, totalOrdinarias: 24, totalDobles: 0, totalTriples: 0, totalRetardos: 0 },
+    reportesEmpleados: [
+      {
+        empleado: { id: "1", numero_empleado: "EMP-001", nombre: "A", apellidos: "A", puesto: "P", curp: null, rfc: null, nss: null },
+        jornadas: [{ fecha: "2026-11-01", entrada: null, inicioDescanso: null, finDescanso: null, salida: null, minutosTrabajadosEfectivos: 480, minutosDescanso: 0, horasOrdinarias: 8, horasExtraDobles: 0, horasExtraTriples: 0, esRetardo: false, minutosRetardo: 0, estadoJornada: "COMPLETA" }],
+        resumen: { horasOrdinariasTotales: 8, horasExtraDoblesTotales: 0, horasExtraTriplesTotales: 0, totalRetardos: 0, diasLaborados: 1 },
+      },
+      {
+        empleado: { id: "2", numero_empleado: "EMP-002", nombre: "B", apellidos: "B", puesto: "P", curp: null, rfc: null, nss: null },
+        jornadas: [{ fecha: "2026-11-01", entrada: null, inicioDescanso: null, finDescanso: null, salida: null, minutosTrabajadosEfectivos: 480, minutosDescanso: 0, horasOrdinarias: 8, horasExtraDobles: 0, horasExtraTriples: 0, esRetardo: false, minutosRetardo: 0, estadoJornada: "COMPLETA" }],
+        resumen: { horasOrdinariasTotales: 8, horasExtraDoblesTotales: 0, horasExtraTriplesTotales: 0, totalRetardos: 0, diasLaborados: 1 },
+      },
+      {
+        empleado: { id: "3", numero_empleado: "EMP-003", nombre: "C", apellidos: "C", puesto: "P", curp: null, rfc: null, nss: null },
+        jornadas: [{ fecha: "2026-11-01", entrada: null, inicioDescanso: null, finDescanso: null, salida: null, minutosTrabajadosEfectivos: 480, minutosDescanso: 0, horasOrdinarias: 8, horasExtraDobles: 0, horasExtraTriples: 0, esRetardo: false, minutosRetardo: 0, estadoJornada: "COMPLETA" }],
+        resumen: { horasOrdinariasTotales: 8, horasExtraDoblesTotales: 0, horasExtraTriplesTotales: 0, totalRetardos: 0, diasLaborados: 1 },
+      },
+    ],
+    marcajesDetallados: [],
+  };
+
+  const buffer = await generarLibroExcelAsistencias(datosMock3);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer as any);
+  const ws = wb.getWorksheet("ASISTENCIAS")!;
+
+  // 3 jornadas -> filas 13, 14, 15. Fila totales = 16.
+  // Con > 2 empleados, NO debe haber líneas de firma en fila 19 o 20
+  const celdaFirma = ws.getCell("C19").value;
+  const celdaTextoFirma = ws.getCell("C20").value;
+  assert.strictEqual(celdaFirma, null, "Con > 2 empleados no debe haber línea de firma");
+  assert.strictEqual(celdaTextoFirma, null, "Con > 2 empleados no debe haber texto de firma");
+
+  console.log("✓ Test de Regla de Firmas con 3 empleados: Bloque de firmas omitido exitosamente.");
 });
