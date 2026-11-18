@@ -14,6 +14,7 @@ import {
   Smartphone,
   ClipboardList,
   CalendarDays,
+  BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { cerrarSesion } from "@/features/auth/actions";
@@ -24,6 +25,11 @@ const navigationItems = [
     name: "Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
+  },
+  {
+    name: "Analytics",
+    href: "/analytics",
+    icon: BarChart3,
   },
   {
     name: "Empleados",

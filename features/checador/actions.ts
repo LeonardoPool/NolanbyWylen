@@ -14,6 +14,13 @@ import {
   validarMagicBytesArchivo,
   type TipoIncidencia,
 } from "@/lib/validaciones/incidencias.schema";
+import {
+  compararDescriptoresFaciales,
+} from "@/lib/biometria/face-id-engine";
+import {
+  obtenerBiometriaFacialEmpleado,
+  guardarBiometriaFacialEmpleado,
+} from "@/features/empleados/actions";
 import type { Database, Json } from "@/types/database.types";
 
 export type EmpleadoRow = Database["public"]["Tables"]["empleados"]["Row"];
@@ -80,6 +87,7 @@ export async function autenticarEmpleado(
   empleado?: EmpleadoRow;
   configuracion?: ConfiguracionTallerRow;
   permisosViaje?: UbicacionExtraordinariaRow[];
+  tieneBiometriaFacial?: boolean;
 }> {
   const idLimpio = identificador.trim();
   const pinLimpio = pin.trim();
@@ -235,11 +243,59 @@ export async function autenticarEmpleado(
     .lte("fecha_inicio", hoyStr)
     .gte("fecha_fin", hoyStr);
 
+  // 7. Validar si la cuenta ya tiene registrado el modelo biométrico Face ID
+  const biometria = await obtenerBiometriaFacialEmpleado(emp.id);
+
   return {
     success: true,
     empleado: emp,
     configuracion: configTaller,
     permisosViaje: permisos ?? [],
+    tieneBiometriaFacial: Boolean(biometria.enrolado),
+  };
+}
+
+/**
+ * Enrola por primera vez el modelo de reconocimiento facial Face ID de un empleado existente.
+ */
+export async function enrolarFaceIdInicial(params: {
+  empleadoId: string;
+  descriptor: number[];
+  fotoBase64: string;
+}): Promise<{ success: boolean; message?: string; error?: string }> {
+  const { empleadoId, descriptor, fotoBase64 } = params;
+
+  if (!empleadoId) {
+    return { success: false, error: "Identificador de empleado no válido." };
+  }
+
+  if (!descriptor || descriptor.length !== 128) {
+    return {
+      success: false,
+      error: "No se pudo extraer el vector biométrico facial de 128 dimensiones. Asegúrate de enfocar bien tu rostro con buena luz.",
+    };
+  }
+
+  if (!fotoBase64) {
+    return {
+      success: false,
+      error: "No se recibió la captura fotográfica del rostro.",
+    };
+  }
+
+  const res = await guardarBiometriaFacialEmpleado({
+    empleadoId,
+    descriptor,
+    fotoThumbnail: fotoBase64,
+  });
+
+  if (!res.success) {
+    return { success: false, error: res.error || "Error al almacenar el modelo biométrico." };
+  }
+
+  return {
+    success: true,
+    message: "¡Modelo Face ID registrado exitosamente! A partir de ahora tus asistencias se verificarán contra tu rostro.",
   };
 }
 
@@ -254,6 +310,8 @@ export async function registrarMarcajeOnline(params: {
   latitud: number;
   longitud: number;
   fotoBase64?: string;
+  descriptorEnVivo?: number[];
+  pruebaDeVidaExitosa?: boolean;
 }): Promise<{
   success: boolean;
   message?: string;
@@ -263,8 +321,18 @@ export async function registrarMarcajeOnline(params: {
   radioPermitido?: number;
   esViaje?: boolean;
   asistencia?: AsistenciaRow;
+  fraudeFacial?: boolean;
+  similitudFacial?: number;
 }> {
-  const { empleadoId, tipoEvento, latitud, longitud, fotoBase64 } = params;
+  const {
+    empleadoId,
+    tipoEvento,
+    latitud,
+    longitud,
+    fotoBase64,
+    descriptorEnVivo,
+    pruebaDeVidaExitosa,
+  } = params;
 
   if (!empleadoId) {
     return { success: false, error: "Identificador de empleado no válido." };
@@ -377,7 +445,52 @@ export async function registrarMarcajeOnline(params: {
     };
   }
 
-  // 5. Guardar evento de asistencia con idempotencia
+  // 5. Verificación Biométrica Facial Face ID (Anti-Fraude y Anti-Suplantación)
+  let validacionIdentidad = fotoBase64 ? "BIOMETRIA_FOTOGRAFICA" : "PIN_GPS";
+  let similitudFacialRegistrada: number | null = null;
+  let distanciaEuclidianaRegistrada: number | null = null;
+
+  try {
+    const biometria = await obtenerBiometriaFacialEmpleado(emp.id);
+
+    if (biometria.enrolado && biometria.descriptor && biometria.descriptor.length === 128) {
+      // El empleado tiene biometría facial enrolada obligatoria
+      if (!descriptorEnVivo || descriptorEnVivo.length !== 128) {
+        return {
+          success: false,
+          fraudeFacial: true,
+          error: `Verificación Face ID requerida: El trabajador ${emp.nombre} ${emp.apellidos} tiene enrolamiento biométrico facial obligatorio. Enciende tu cámara para validar tu rostro.`,
+        };
+      }
+
+      const comparacion = compararDescriptoresFaciales(biometria.descriptor, descriptorEnVivo);
+      similitudFacialRegistrada = Math.round(comparacion.porcentajeSimilitud);
+      distanciaEuclidianaRegistrada = Number(comparacion.distanciaEuclidiana.toFixed(4));
+
+      if (!comparacion.coincide) {
+        return {
+          success: false,
+          fraudeFacial: true,
+          similitudFacial: similitudFacialRegistrada,
+          error: `Alerta Anti-Fraude: El rostro capturado no coincide con el Face ID registrado de ${emp.nombre} (Similitud: ${similitudFacialRegistrada}%, requerido mínimo 82%). Marcaje rechazado por seguridad.`,
+        };
+      }
+
+      validacionIdentidad = "FACE_ID_BIOMETRICO_VERIFICADO";
+    } else if (descriptorEnVivo && descriptorEnVivo.length === 128 && fotoBase64) {
+      // Si el empleado aún no estaba enrolado y presenta una muestra facial válida, auto-enrolar baseline
+      await guardarBiometriaFacialEmpleado({
+        empleadoId: emp.id,
+        descriptor: descriptorEnVivo,
+        fotoThumbnail: fotoBase64,
+      });
+      validacionIdentidad = "FACE_ID_PRIMER_ENROLAMIENTO";
+    }
+  } catch (errBiom) {
+    console.error("Aviso en validación Face ID:", errBiom);
+  }
+
+  // 6. Guardar evento de asistencia con idempotencia
   const ahora = new Date();
   const fechaStr = ahora.toISOString();
   const minutoVentana = fechaStr.slice(0, 16);
@@ -394,7 +507,10 @@ export async function registrarMarcajeOnline(params: {
     distancia_metros: distanciaFinal,
     fecha_cliente: fechaStr,
     foto_verificacion: fotoBase64 || null,
-    validacion_identidad: fotoBase64 ? "BIOMETRIA_FOTOGRAFICA" : "PIN_GPS",
+    validacion_identidad: validacionIdentidad,
+    similitud_facial: similitudFacialRegistrada,
+    distancia_euclidiana: distanciaEuclidianaRegistrada,
+    prueba_de_vida: pruebaDeVidaExitosa ?? Boolean(fotoBase64),
   };
 
   const { data: nuevaAsistencia, error: insertError } = await adminClient

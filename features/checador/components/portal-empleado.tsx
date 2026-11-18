@@ -38,6 +38,7 @@ import {
   obtenerMarcajesDelDia,
   registrarIncidencia,
   obtenerIncidenciasEmpleado,
+  enrolarFaceIdInicial,
   type EmpleadoRow,
   type ConfiguracionTallerRow,
   type AsistenciaRow,
@@ -45,12 +46,19 @@ import {
   type UbicacionExtraordinariaRow,
   type TipoEventoChecador,
 } from "../actions";
+import {
+  generarDescriptorFacialDesdeCanvas,
+  verificarPruebaDeVida,
+} from "@/lib/biometria/face-id-engine";
 
 export function PortalEmpleado() {
   // Sesión local del empleado
   const [empleado, setEmpleado] = useState<EmpleadoRow | null>(null);
   const [configuracion, setConfiguracion] = useState<ConfiguracionTallerRow | null>(null);
   const [permisosViaje, setPermisosViaje] = useState<UbicacionExtraordinariaRow[]>([]);
+  const [tieneBiometriaFacial, setTieneBiometriaFacial] = useState(false);
+  const [modalEnrolamientoFacial, setModalEnrolamientoFacial] = useState(false);
+  const [enrolandoFaceId, setEnrolandoFaceId] = useState(false);
 
   // Form login
   const [identificador, setIdentificador] = useState("");
@@ -372,13 +380,102 @@ export function PortalEmpleado() {
       setEmpleado(res.empleado);
       setConfiguracion(res.configuracion);
       setPermisosViaje(res.permisosViaje || []);
-      notify.success("Bienvenido", `Hola, ${res.empleado.nombre}`);
+
+      const tieneBio = Boolean(res.tieneBiometriaFacial);
+      setTieneBiometriaFacial(tieneBio);
+
+      if (!tieneBio) {
+        notify.warning(
+          "Face ID Requerido",
+          "Tu cuenta aún no tiene registrado su modelo facial. Debes registrarlo por primera vez para proteger tus asistencias."
+        );
+        setModalEnrolamientoFacial(true);
+        iniciarCamara();
+      } else {
+        notify.success("Bienvenido", `Hola, ${res.empleado.nombre}`);
+      }
     });
+  }
+
+  // Capturar y enrolar Face ID inicial para cuentas sin modelo registrado
+  async function capturarYEnrolarFaceId() {
+    if (!empleado) return;
+    setEnrolandoFaceId(true);
+
+    try {
+      if (!videoRef.current || !camaraActiva) {
+        notify.error("Cámara no activa", "Inicia la cámara para registrar tu rostro.");
+        setEnrolandoFaceId(false);
+        return;
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = 320;
+      canvas.height = 320;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        setEnrolandoFaceId(false);
+        return;
+      }
+
+      const vWidth = videoRef.current.videoWidth || 320;
+      const vHeight = videoRef.current.videoHeight || 320;
+      const size = Math.min(vWidth, vHeight);
+      const startX = (vWidth - size) / 2;
+      const startY = (vHeight - size) / 2;
+
+      ctx.drawImage(videoRef.current, startX, startY, size, size, 0, 0, 320, 320);
+      const fotoBase64 = canvas.toDataURL("image/jpeg", 0.75);
+
+      const resultado = generarDescriptorFacialDesdeCanvas(canvas);
+      if (!resultado.exito || !resultado.descriptor || resultado.descriptor.length !== 128) {
+        notify.error(
+          "Rostro no detectado",
+          "No se detectó un rostro claro. Centra tu rostro en buena iluminación e intenta de nuevo."
+        );
+        setEnrolandoFaceId(false);
+        return;
+      }
+
+      const res = await enrolarFaceIdInicial({
+        empleadoId: empleado.id,
+        descriptor: resultado.descriptor,
+        fotoBase64,
+      });
+
+      if (!res.success) {
+        notify.error("Error al enrolar", res.error || "No se pudo guardar el modelo facial.");
+        setEnrolandoFaceId(false);
+        return;
+      }
+
+      setTieneBiometriaFacial(true);
+      detenerCamara();
+      setModalEnrolamientoFacial(false);
+      notify.success(
+        "¡Face ID Enrolado con Éxito!",
+        "Tu modelo facial ha sido registrado. A partir de ahora tus asistencias contarán con autenticación biométrica."
+      );
+    } catch {
+      notify.error("Error inesperado", "Ocurrió un error al procesar el enrolamiento facial.");
+    } finally {
+      setEnrolandoFaceId(false);
+    }
   }
 
   // Iniciar flujo de marcaje con verificación facial
   function handleMarcaje(tipoEvento: TipoEventoChecador) {
     if (!empleado) return;
+
+    if (!tieneBiometriaFacial) {
+      notify.warning(
+        "Face ID Requerido",
+        "Debes enrolar tu modelo facial Face ID antes de poder marcar asistencia."
+      );
+      setModalEnrolamientoFacial(true);
+      iniciarCamara();
+      return;
+    }
 
     if (!coords) {
       notify.warning("GPS Requerido", "Debes permitir el acceso a tu ubicación GPS para registrar asistencia.");
@@ -391,12 +488,14 @@ export function PortalEmpleado() {
     iniciarCamara();
   }
 
-  // Tomar foto instantánea y enviar marcaje
+  // Tomar foto instantánea, extraer vector Face ID y enviar marcaje
   async function capturarFotoYRegistrar() {
     if (!empleado || !coords || !eventoPendiente) return;
     setCapturandoFoto(true);
 
     let fotoDataUrl: string | undefined = undefined;
+    let descriptorFacial: number[] | undefined = undefined;
+    let pruebaDeVidaOk = true;
 
     if (videoRef.current && camaraActiva) {
       try {
@@ -413,7 +512,29 @@ export function PortalEmpleado() {
           const startY = (vHeight - size) / 2;
 
           ctx.drawImage(videoRef.current, startX, startY, size, size, 0, 0, 320, 320);
-          fotoDataUrl = canvas.toDataURL("image/jpeg", 0.65);
+          fotoDataUrl = canvas.toDataURL("image/jpeg", 0.70);
+
+          // 1. Extraer vector biométrico Face ID (128 dimensiones normalizadas)
+          const resultadoExtraccion = generarDescriptorFacialDesdeCanvas(canvas);
+          if (resultadoExtraccion.exito && resultadoExtraccion.descriptor) {
+            descriptorFacial = resultadoExtraccion.descriptor;
+          }
+
+          // 2. Comprobar prueba de vida (anti-pantalla estática / anti-spoofing)
+          const f1 = ctx.getImageData(0, 0, 320, 320);
+          await new Promise((r) => setTimeout(r, 90));
+          if (videoRef.current) {
+            const canvas2 = document.createElement("canvas");
+            canvas2.width = 320;
+            canvas2.height = 320;
+            const ctx2 = canvas2.getContext("2d", { willReadFrequently: true });
+            if (ctx2) {
+              ctx2.drawImage(videoRef.current, startX, startY, size, size, 0, 0, 320, 320);
+              const f2 = ctx2.getImageData(0, 0, 320, 320);
+              const testVida = verificarPruebaDeVida([f1, f2]);
+              pruebaDeVidaOk = testVida.aprobada;
+            }
+          }
         }
       } catch {
         // Fallback si falla captura
@@ -423,7 +544,7 @@ export function PortalEmpleado() {
     detenerCamara();
     setModalCamara(false);
 
-    await ejecutarMarcajeFinal(eventoPendiente, fotoDataUrl);
+    await ejecutarMarcajeFinal(eventoPendiente, fotoDataUrl, descriptorFacial, pruebaDeVidaOk);
     setCapturandoFoto(false);
   }
 
@@ -432,11 +553,16 @@ export function PortalEmpleado() {
     if (!eventoPendiente) return;
     detenerCamara();
     setModalCamara(false);
-    await ejecutarMarcajeFinal(eventoPendiente, undefined);
+    await ejecutarMarcajeFinal(eventoPendiente, undefined, undefined, false);
   }
 
-  // Llamada final al servidor con coordenadas y selfie
-  async function ejecutarMarcajeFinal(tipoEvento: TipoEventoChecador, fotoBase64?: string) {
+  // Llamada final al servidor con coordenadas, selfie y vector biométrico Face ID
+  async function ejecutarMarcajeFinal(
+    tipoEvento: TipoEventoChecador,
+    fotoBase64?: string,
+    descriptorEnVivo?: number[],
+    pruebaDeVidaExitosa?: boolean
+  ) {
     if (!empleado || !coords) return;
 
     startMarkingTransition(async () => {
@@ -446,17 +572,29 @@ export function PortalEmpleado() {
         latitud: coords.lat,
         longitud: coords.lng,
         fotoBase64,
+        descriptorEnVivo,
+        pruebaDeVidaExitosa,
       });
 
       if (!res.success) {
-        notify.error("Marcaje no permitido", res.error);
+        if (res.fraudeFacial) {
+          notify.error(
+            "Alerta de Seguridad Face ID",
+            res.error || "El rostro escaneado no coincide con el Face ID registrado."
+          );
+        } else {
+          notify.error("Marcaje no permitido", res.error);
+        }
         if (res.fueraDeRango && res.distanciaMetros) {
           setDistanciaMetros(res.distanciaMetros);
         }
         return;
       }
 
-      notify.success(res.esViaje ? "Marcaje en viaje registrado" : "Marcaje Registrado", res.message);
+      notify.success(
+        res.esViaje ? "Marcaje en viaje registrado" : "Marcaje Registrado",
+        res.message
+      );
       const marcajesActualizados = await obtenerMarcajesDelDia(empleado.id);
       setAsistenciasHoy(marcajesActualizados);
     });
@@ -623,9 +761,9 @@ export function PortalEmpleado() {
   const dentroDeGeocerca = Boolean(lugarValidoNombre);
 
   return (
-    <div className="min-h-screen bg-[#FAF9F6] pb-12">
-      {/* Barra Superior Móvil */}
-      <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-zinc-200/80 px-4 py-3">
+    <div className="min-h-screen bg-[#FAF9F6] pb-12 pb-safe">
+      {/* Barra Superior Móvil con Safe Area */}
+      <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-zinc-200/80 px-4 py-3 pt-safe">
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="h-8 w-8 rounded-full bg-zinc-900 text-white flex items-center justify-center font-bold text-xs shrink-0">
@@ -638,6 +776,22 @@ export function PortalEmpleado() {
               </p>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="text-[10px] text-zinc-500 font-medium">{empleado.puesto}</span>
+                {tieneBiometriaFacial ? (
+                  <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-800 border-emerald-200 flex items-center gap-0.5 font-medium">
+                    <ScanFace className="h-2.5 w-2.5 text-emerald-600" /> Face ID Activo
+                  </Badge>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalEnrolamientoFacial(true);
+                      iniciarCamara();
+                    }}
+                    className="text-[9px] bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded px-1.5 py-0.5 flex items-center gap-1 font-bold cursor-pointer transition-colors"
+                  >
+                    <ScanFace className="h-2.5 w-2.5" /> Enrolar Face ID
+                  </button>
+                )}
                 {permisosViaje.length > 0 && (
                   <Badge variant="outline" className="text-[9px] bg-blue-50 text-blue-700 border-blue-200 flex items-center gap-0.5">
                     <Plane className="h-2.5 w-2.5" /> Viaje Activo
@@ -1154,14 +1308,14 @@ export function PortalEmpleado() {
         </div>
       )}
 
-      {/* Modal de Validación Facial (LFT Art. 132 fr. XXXIV - Identidad Inequívoca) */}
+      {/* Modal de Validación Facial (Face ID Biométrico Anti-Fraude) */}
       {modalCamara && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl max-w-sm w-full p-5 shadow-2xl space-y-4 border border-zinc-200 text-center">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-900">
-                <ScanFace className="h-4 w-4 text-blue-600" />
-                <span>Verificación Facial LFT</span>
+                <ScanFace className="h-4 w-4 text-emerald-600" />
+                <span>Face ID Biométrico Anti-Fraude</span>
               </div>
               <button
                 type="button"
@@ -1176,11 +1330,115 @@ export function PortalEmpleado() {
             </div>
 
             <p className="text-[11px] text-zinc-500 leading-relaxed">
-              Para garantizar tu <strong>identidad inalterable</strong> según la normativa laboral, coloca tu rostro frente a la cámara:
+              Ubica tu rostro al centro del visor. El sistema cotejará tus vectores faciales y registrará la evidencia fotográfica inalterable del marcaje:
             </p>
 
-            {/* Visor de Cámara */}
-            <div className="relative w-52 h-52 mx-auto rounded-full overflow-hidden border-4 border-blue-600 shadow-inner bg-zinc-900 flex items-center justify-center">
+            {/* Visor de Cámara con escaneo biométrico */}
+            <div className="relative w-56 h-56 mx-auto rounded-3xl overflow-hidden border-2 border-emerald-500/80 shadow-2xl bg-zinc-950 flex items-center justify-center">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className={`w-full h-full object-cover scale-x-[-1] ${
+                  camaraActiva ? "block" : "hidden"
+                }`}
+              />
+              {!camaraActiva && !camaraError && (
+                <div className="flex flex-col items-center justify-center text-zinc-400 space-y-2">
+                  <Loader2 className="h-6 w-6 animate-spin text-emerald-500" />
+                  <span className="text-[10px]">Iniciando sensor biométrico...</span>
+                </div>
+              )}
+              {camaraError && (
+                <div className="p-4 text-center text-zinc-300 space-y-2">
+                  <CameraOff className="h-6 w-6 mx-auto text-amber-400" />
+                  <p className="text-[10px] leading-tight">{camaraError}</p>
+                </div>
+              )}
+              {/* Retícula de escaneo biométrico Face ID */}
+              <div className="absolute inset-4 rounded-2xl border border-dashed border-emerald-400/50 pointer-events-none flex flex-col justify-between p-2">
+                <div className="flex justify-between text-[9px] text-emerald-400 font-mono tracking-widest opacity-80">
+                  <span>[FACE_ID]</span>
+                  <span>[128D]</span>
+                </div>
+                <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent animate-pulse" />
+                <div className="flex justify-between text-[9px] text-emerald-400 font-mono tracking-widest opacity-80">
+                  <span>TARGET_LOCK</span>
+                  <span>LIVE_OK</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <Button
+                type="button"
+                onClick={capturarFotoYRegistrar}
+                disabled={capturandoFoto || isMarking}
+                className="w-full h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-md"
+              >
+                {capturandoFoto || isMarking ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                    Verificando Face ID y Guardando...
+                  </>
+                ) : (
+                  <>
+                    <ScanFace className="h-4 w-4 mr-1.5" />
+                    Validar Face ID y Registrar {eventoPendiente?.replace("_", " ")}
+                  </>
+                )}
+              </Button>
+
+              {!tieneBiometriaFacial && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={omitirFotoYRegistrar}
+                    disabled={capturandoFoto || isMarking}
+                    className="text-[11px] text-zinc-500 hover:text-zinc-800 underline decoration-zinc-300 hover:decoration-zinc-600 cursor-pointer"
+                  >
+                    Omitir foto y registrar solo con GPS
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Enrolamiento Facial Inicial Obligatorio */}
+      {modalEnrolamientoFacial && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-5 shadow-2xl space-y-4 border border-zinc-200 text-center">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-900">
+                <ScanFace className="h-4 w-4 text-blue-600" />
+                <span>Registro Oficial de Face ID</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  detenerCamara();
+                  setModalEnrolamientoFacial(false);
+                }}
+                className="text-zinc-400 hover:text-zinc-700"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-blue-50/80 rounded-2xl border border-blue-100 text-left space-y-1">
+              <span className="text-[11px] font-bold text-blue-900 block">
+                Paso Único: Enrolamiento Biométrico
+              </span>
+              <p className="text-[10px] text-blue-700 leading-relaxed">
+                Tu cuenta no tiene registrado tu modelo facial oficial. Captura tu rostro ahora para activar el Face ID y proteger tus asistencias contra fraude o suplantación.
+              </p>
+            </div>
+
+            {/* Visor de Cámara con Marco de Guía Ovalado */}
+            <div className="relative w-56 h-56 mx-auto rounded-3xl overflow-hidden border-2 border-blue-500/80 shadow-2xl bg-zinc-950 flex items-center justify-center">
               <video
                 ref={videoRef}
                 autoPlay
@@ -1193,49 +1451,59 @@ export function PortalEmpleado() {
               {!camaraActiva && !camaraError && (
                 <div className="flex flex-col items-center justify-center text-zinc-400 space-y-2">
                   <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
-                  <span className="text-[10px]">Activando cámara...</span>
+                  <span className="text-[10px]">Iniciando cámara frontal...</span>
                 </div>
               )}
               {camaraError && (
                 <div className="p-4 text-center text-zinc-300 space-y-2">
                   <CameraOff className="h-6 w-6 mx-auto text-amber-400" />
                   <p className="text-[10px] leading-tight">{camaraError}</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={iniciarCamara}
+                    className="text-[10px] h-7 bg-white/10 text-white border-zinc-700"
+                  >
+                    Reintentar
+                  </Button>
                 </div>
               )}
-              {/* Guía facial */}
-              <div className="absolute inset-4 rounded-full border-2 border-dashed border-white/60 pointer-events-none" />
+
+              {/* Guía Facial Biométrica */}
+              <div className="absolute inset-4 rounded-[40%] border-2 border-dashed border-blue-400/70 pointer-events-none flex flex-col justify-between p-2">
+                <div className="flex justify-between text-[9px] text-blue-400 font-mono tracking-widest opacity-90">
+                  <span>[ENROLAR]</span>
+                  <span>[128D]</span>
+                </div>
+                <div className="text-center text-[9px] text-blue-300 font-mono">
+                  CENTRA TU ROSTRO
+                </div>
+                <div className="flex justify-between text-[9px] text-blue-400 font-mono tracking-widest opacity-90">
+                  <span>BUENA LUZ</span>
+                  <span>MIRA AL FRENTE</span>
+                </div>
+              </div>
             </div>
 
             <div className="space-y-2 pt-1">
               <Button
                 type="button"
-                onClick={capturarFotoYRegistrar}
-                disabled={capturandoFoto || isMarking}
-                className="w-full h-10 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-md"
+                onClick={capturarYEnrolarFaceId}
+                disabled={enrolandoFaceId || !camaraActiva}
+                className="w-full h-10 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-md cursor-pointer"
               >
-                {capturandoFoto || isMarking ? (
+                {enrolandoFaceId ? (
                   <>
                     <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
-                    Validando y Guardando...
+                    Procesando Modelo Facial...
                   </>
                 ) : (
                   <>
-                    <Camera className="h-4 w-4 mr-1.5" />
-                    Tomar Foto y Registrar {eventoPendiente?.replace("_", " ")}
+                    <ScanFace className="h-4 w-4 mr-1.5" />
+                    Capturar y Guardar mi Face ID
                   </>
                 )}
               </Button>
-
-              <div>
-                <button
-                  type="button"
-                  onClick={omitirFotoYRegistrar}
-                  disabled={capturandoFoto || isMarking}
-                  className="text-[11px] text-zinc-500 hover:text-zinc-800 underline decoration-zinc-300 hover:decoration-zinc-600 cursor-pointer"
-                >
-                  Omitir foto y registrar solo con GPS
-                </button>
-              </div>
             </div>
           </div>
         </div>

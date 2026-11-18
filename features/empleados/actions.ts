@@ -430,3 +430,110 @@ export async function cambiarEstadoEmpleado(
     empleado: actualizado,
   };
 }
+
+const BUCKET_BIOMETRIA = "biometria-facial";
+
+/**
+ * Guarda o actualiza el descriptor biométrico Face ID (128D) y fotografía de referencia del empleado.
+ */
+export async function guardarBiometriaFacialEmpleado(params: {
+  empleadoId: string;
+  descriptor: number[];
+  fotoThumbnail: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { empleadoId, descriptor, fotoThumbnail } = params;
+    if (!empleadoId || !descriptor || descriptor.length !== 128) {
+      return { success: false, error: "Descriptor facial inválido o incompleto." };
+    }
+
+    const adminClient = createAdminClient();
+
+    // Asegurar que el bucket privado exista
+    await adminClient.storage.createBucket(BUCKET_BIOMETRIA, { public: false }).catch(() => {});
+
+    const payload = JSON.stringify({
+      empleadoId,
+      descriptor,
+      fotoThumbnail,
+      fechaEnrolamiento: new Date().toISOString(),
+      version: "1.0",
+    });
+
+    const filePath = `descriptores/${empleadoId}.json`;
+    const { error: uploadError } = await adminClient.storage
+      .from(BUCKET_BIOMETRIA)
+      .upload(filePath, payload, {
+        contentType: "application/json",
+        upsert: true,
+      });
+
+    if (uploadError) {
+      return { success: false, error: `Error al almacenar biometría: ${uploadError.message}` };
+    }
+
+    // Si no tiene código biométrico asignado en base de datos, asignarle uno referencial
+    const { data: empActual } = await adminClient
+      .from("empleados")
+      .select("codigo_biometrico")
+      .eq("id", empleadoId)
+      .maybeSingle();
+
+    if (!empActual?.codigo_biometrico || empActual.codigo_biometrico.trim() === "") {
+      await adminClient
+        .from("empleados")
+        .update({
+          codigo_biometrico: `FACE_${empleadoId.slice(0, 6).toUpperCase()}`,
+        })
+        .eq("id", empleadoId);
+    }
+
+    revalidatePath("/empleados");
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Error al guardar biometría facial.",
+    };
+  }
+}
+
+/**
+ * Obtiene el descriptor biométrico Face ID enrolado de un empleado para cotejo 1:1 anti-fraude.
+ */
+export async function obtenerBiometriaFacialEmpleado(
+  empleadoId: string
+): Promise<{
+  enrolado: boolean;
+  descriptor?: number[];
+  fotoThumbnail?: string;
+  fechaEnrolamiento?: string;
+  error?: string;
+}> {
+  try {
+    if (!empleadoId) return { enrolado: false };
+
+    const adminClient = createAdminClient();
+    const filePath = `descriptores/${empleadoId}.json`;
+
+    const { data, error } = await adminClient.storage
+      .from(BUCKET_BIOMETRIA)
+      .download(filePath);
+
+    if (error || !data) {
+      return { enrolado: false };
+    }
+
+    const text = await data.text();
+    const parsed = JSON.parse(text);
+
+    return {
+      enrolado: Boolean(parsed.descriptor && parsed.descriptor.length === 128),
+      descriptor: parsed.descriptor,
+      fotoThumbnail: parsed.fotoThumbnail,
+      fechaEnrolamiento: parsed.fechaEnrolamiento,
+    };
+  } catch {
+    return { enrolado: false };
+  }
+}

@@ -1,7 +1,10 @@
 import { Suspense } from "react";
 import { connection } from "next/server";
 import type { Metadata } from "next";
-import { obtenerConfiguracionTaller } from "@/features/configuracion/actions";
+import {
+  obtenerConfiguracionTaller,
+  obtenerHorarioLaboralConfig,
+} from "@/features/configuracion/actions";
 import { obtenerCatalogoEmpleados } from "@/features/empleados/actions";
 import { obtenerPermisosExtraordinarios } from "@/features/permisos-viaje/actions";
 import { ConfiguracionVista } from "@/features/configuracion/components/configuracion-vista";
@@ -10,15 +13,17 @@ import { Loader2 } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "Configuración del Sistema",
-  description: "Parámetros operativos de NOLAN, geocerca del taller, Google Maps y permisos extraordinarios de viaje.",
+  description:
+    "Parámetros operativos de NOLAN, sistema inteligente de horario laboral, Google Maps y permisos extraordinarios de viaje.",
 };
 
 async function ConfiguracionContenido() {
   await connection();
-  const [{ configuracion, esAdmin }, { empleados }, { permisos }] = await Promise.all([
+  const [{ configuracion, esAdmin }, { empleados }, { permisos }, horario] = await Promise.all([
     obtenerConfiguracionTaller(),
     obtenerCatalogoEmpleados(),
     obtenerPermisosExtraordinarios(),
+    obtenerHorarioLaboralConfig(),
   ]);
 
   return (
@@ -26,6 +31,7 @@ async function ConfiguracionContenido() {
       configuracionInicial={configuracion}
       empleados={empleados}
       permisosIniciales={permisos}
+      horarioInicial={horario}
       esAdmin={esAdmin}
     />
   );

@@ -4,6 +4,10 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database, Json } from "@/types/database.types";
+import {
+  HorarioLaboralConfig,
+  HORARIO_LABORAL_DEFAULT,
+} from "@/lib/lft/calculo-horas";
 
 export type ConfiguracionTallerRow = Database["public"]["Tables"]["configuracion_taller"]["Row"];
 
@@ -357,6 +361,153 @@ export async function obtenerDetalleLugarGoogle(placeId: string): Promise<{
         err instanceof Error
           ? err.message
           : "Error al conectar con el servicio de detalles de Google Maps",
+    };
+  }
+}
+
+const BUCKET_CONFIG = "configuracion-sistema";
+const ARCHIVO_HORARIOS = "horario-laboral.json";
+
+/**
+ * Consulta la configuración de horario laboral del taller y regla de horas extras.
+ * Aplica para todos los empleados registrados.
+ */
+export async function obtenerHorarioLaboralConfig(): Promise<HorarioLaboralConfig> {
+  try {
+    const adminClient = createAdminClient();
+
+    const { data, error } = await adminClient.storage
+      .from(BUCKET_CONFIG)
+      .download(ARCHIVO_HORARIOS);
+
+    if (error || !data) {
+      return HORARIO_LABORAL_DEFAULT;
+    }
+
+    const text = await data.text();
+    const parsed = JSON.parse(text);
+
+    return {
+      semanal: {
+        dias: Array.isArray(parsed.semanal?.dias)
+          ? parsed.semanal.dias
+          : HORARIO_LABORAL_DEFAULT.semanal.dias,
+        horaEntrada: parsed.semanal?.horaEntrada || HORARIO_LABORAL_DEFAULT.semanal.horaEntrada,
+        horaSalida: parsed.semanal?.horaSalida || HORARIO_LABORAL_DEFAULT.semanal.horaSalida,
+        toleranciaEntradaMinutos:
+          parsed.semanal?.toleranciaEntradaMinutos ??
+          HORARIO_LABORAL_DEFAULT.semanal.toleranciaEntradaMinutos,
+      },
+      finDeSemana: {
+        sabadoLaborable:
+          parsed.finDeSemana?.sabadoLaborable ??
+          HORARIO_LABORAL_DEFAULT.finDeSemana.sabadoLaborable,
+        dias: Array.isArray(parsed.finDeSemana?.dias)
+          ? parsed.finDeSemana.dias
+          : parsed.finDeSemana?.sabadoLaborable === false
+          ? []
+          : [6],
+        horaEntradaSabado:
+          parsed.finDeSemana?.horaEntradaSabado ||
+          HORARIO_LABORAL_DEFAULT.finDeSemana.horaEntradaSabado,
+        horaSalidaSabado:
+          parsed.finDeSemana?.horaSalidaSabado ||
+          HORARIO_LABORAL_DEFAULT.finDeSemana.horaSalidaSabado,
+        toleranciaSabadoMinutos:
+          parsed.finDeSemana?.toleranciaSabadoMinutos ??
+          HORARIO_LABORAL_DEFAULT.finDeSemana.toleranciaSabadoMinutos,
+        diaDescansoSemanal:
+          parsed.finDeSemana?.diaDescansoSemanal ??
+          HORARIO_LABORAL_DEFAULT.finDeSemana.diaDescansoSemanal,
+        diasDescanso: Array.isArray(parsed.finDeSemana?.diasDescanso)
+          ? parsed.finDeSemana.diasDescanso
+          : undefined,
+      },
+      horasExtras: {
+        minutosMinimosToleranciaSalida:
+          parsed.horasExtras?.minutosMinimosToleranciaSalida ??
+          HORARIO_LABORAL_DEFAULT.horasExtras.minutosMinimosToleranciaSalida,
+      },
+    };
+  } catch {
+    return HORARIO_LABORAL_DEFAULT;
+  }
+}
+
+/**
+ * Actualiza el horario laboral del taller y regla de horas extras.
+ * Aplica de forma global a todos los empleados del sistema.
+ */
+export async function actualizarHorarioLaboralConfig(
+  nuevaConfig: HorarioLaboralConfig
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return { success: false, error: "Sesión no válida o expirada." };
+    }
+
+    const { data: perfil } = await supabase
+      .from("perfiles")
+      .select("rol, activo")
+      .eq("id", user.id)
+      .single();
+
+    if (!perfil?.activo || perfil.rol !== "ADMINISTRADOR") {
+      return {
+        success: false,
+        error: "Solo un usuario con rol ADMINISTRADOR puede modificar el horario laboral.",
+      };
+    }
+
+    const adminClient = createAdminClient();
+
+    // Asegurar que el bucket privado exista
+    await adminClient.storage.createBucket(BUCKET_CONFIG, { public: false }).catch(() => {});
+
+    const payload = JSON.stringify({
+      ...nuevaConfig,
+      fechaActualizacion: new Date().toISOString(),
+      actualizadoPor: user.id,
+    });
+
+    const { error: uploadError } = await adminClient.storage
+      .from(BUCKET_CONFIG)
+      .upload(ARCHIVO_HORARIOS, payload, {
+        contentType: "application/json",
+        upsert: true,
+      });
+
+    if (uploadError) {
+      return { success: false, error: `Error al almacenar horario: ${uploadError.message}` };
+    }
+
+    // Sincronizar día de descanso semanal con configuracion_taller
+    await adminClient
+      .from("configuracion_taller")
+      .update({
+        dia_descanso_semanal: nuevaConfig.finDeSemana.diaDescansoSemanal,
+        fecha_actualizacion: new Date().toISOString(),
+      })
+      .neq("id", "00000000-0000-0000-0000-000000000000");
+
+    revalidatePath("/configuracion");
+    revalidatePath("/dashboard");
+    revalidatePath("/analytics");
+    revalidatePath("/reportes");
+
+    return {
+      success: true,
+      message: "Horario laboral semanal, fines de semana y regla de horas extras actualizados para todos los empleados.",
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Error al guardar horario laboral.",
     };
   }
 }

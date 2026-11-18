@@ -21,6 +21,13 @@ import {
   Palmtree,
   CalendarCheck,
   Info,
+  Camera,
+  CameraOff,
+  ScanFace,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+  UploadCloud,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,7 +36,14 @@ import {
   calcularAniversariosCumplidos,
   calcularDiasPorAnioServicioLFT,
 } from "@/lib/lft/vacaciones-lft";
-import { crearEmpleado, actualizarEmpleado, type EmpleadoRow } from "../actions";
+import {
+  crearEmpleado,
+  actualizarEmpleado,
+  guardarBiometriaFacialEmpleado,
+  obtenerBiometriaFacialEmpleado,
+  type EmpleadoRow,
+} from "../actions";
+import { generarDescriptorFacialDesdeCanvas } from "@/lib/biometria/face-id-engine";
 
 interface EmpleadoDialogProps {
   isOpen: boolean;
@@ -57,7 +71,7 @@ export function EmpleadoDialog({
 }: EmpleadoDialogProps) {
   const [isPending, startTransition] = useTransition();
   const [errorLocal, setErrorLocal] = useState<string | null>(null);
-  const [pestañaActiva, setPestañaActiva] = useState<"general" | "fiscal" | "acceso">("general");
+  const [pestañaActiva, setPestañaActiva] = useState<"general" | "fiscal" | "acceso" | "biometria">("general");
 
   // Form states
   const [numeroEmpleado, setNumeroEmpleado] = useState("");
@@ -77,6 +91,18 @@ export function EmpleadoDialog({
   const [correo, setCorreo] = useState("");
   const [pin, setPin] = useState("");
   const [permiteChecadoWeb, setPermiteChecadoWeb] = useState(true);
+
+  // Biometría Facial Face ID
+  const [biometriaEnroladaPrevia, setBiometriaEnroladaPrevia] = useState(false);
+  const [fotoThumbnailPrevia, setFotoThumbnailPrevia] = useState<string | null>(null);
+  const [fechaEnrolamientoPrevia, setFechaEnrolamientoPrevia] = useState<string | null>(null);
+  const [nuevoDescriptorFacial, setNuevoDescriptorFacial] = useState<number[] | null>(null);
+  const [nuevaFotoFacial, setNuevaFotoFacial] = useState<string | null>(null);
+  const [camaraBiometriaActiva, setCamaraBiometriaActiva] = useState(false);
+  const [camaraBiometriaError, setCamaraBiometriaError] = useState<string | null>(null);
+  const videoBiometriaRef = React.useRef<HTMLVideoElement | null>(null);
+  const streamBiometriaRef = React.useRef<MediaStream | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   // Control de Vacaciones Previas (para colaboradores con antigüedad acumulada)
   const [haTomadoVacaciones, setHaTomadoVacaciones] = useState<boolean | null>(null);
@@ -106,6 +132,11 @@ export function EmpleadoDialog({
   const esEdicion = Boolean(empleadoAEditar);
 
   useEffect(() => {
+    setNuevoDescriptorFacial(null);
+    setNuevaFotoFacial(null);
+    setCamaraBiometriaActiva(false);
+    setCamaraBiometriaError(null);
+
     if (empleadoAEditar) {
       setNumeroEmpleado(empleadoAEditar.numero_empleado || "");
       setCodigoBiometrico(empleadoAEditar.codigo_biometrico || "");
@@ -124,6 +155,12 @@ export function EmpleadoDialog({
       setCorreo(empleadoAEditar.correo || "");
       setPin(empleadoAEditar.pin || "");
       setPermiteChecadoWeb(empleadoAEditar.permite_checado_web ?? true);
+
+      obtenerBiometriaFacialEmpleado(empleadoAEditar.id).then((res) => {
+        setBiometriaEnroladaPrevia(res.enrolado);
+        setFotoThumbnailPrevia(res.fotoThumbnail || null);
+        setFechaEnrolamientoPrevia(res.fechaEnrolamiento || null);
+      });
     } else {
       setNumeroEmpleado("");
       setCodigoBiometrico("");
@@ -140,16 +177,132 @@ export function EmpleadoDialog({
       setPermiteChecadoWeb(true);
       setHaTomadoVacaciones(null);
       setDiasTomadosVacaciones(0);
+      setBiometriaEnroladaPrevia(false);
+      setFotoThumbnailPrevia(null);
+      setFechaEnrolamientoPrevia(null);
     }
     setErrorLocal(null);
     setPestañaActiva("general");
   }, [empleadoAEditar, isOpen]);
+
+  // Limpieza de cámara al cerrar componente
+  useEffect(() => {
+    return () => {
+      if (streamBiometriaRef.current) {
+        streamBiometriaRef.current.getTracks().forEach((track) => track.stop());
+        streamBiometriaRef.current = null;
+      }
+    };
+  }, []);
 
   if (!isOpen) return null;
 
   function generarPinAleatorio() {
     const pinRandom = Math.floor(1000 + Math.random() * 9000).toString();
     setPin(pinRandom);
+  }
+
+  async function iniciarCamaraBiometria() {
+    setCamaraBiometriaError(null);
+    try {
+      if (streamBiometriaRef.current) {
+        streamBiometriaRef.current.getTracks().forEach((t) => t.stop());
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 640 } },
+        audio: false,
+      });
+      streamBiometriaRef.current = stream;
+      if (videoBiometriaRef.current) {
+        videoBiometriaRef.current.srcObject = stream;
+        await videoBiometriaRef.current.play();
+      }
+      setCamaraBiometriaActiva(true);
+    } catch {
+      setCamaraBiometriaError("No se pudo iniciar la cámara. Verifica los permisos del navegador.");
+    }
+  }
+
+  function detenerCamaraBiometria() {
+    if (streamBiometriaRef.current) {
+      streamBiometriaRef.current.getTracks().forEach((t) => t.stop());
+      streamBiometriaRef.current = null;
+    }
+    setCamaraBiometriaActiva(false);
+  }
+
+  function capturarMuestraFacial() {
+    if (!videoBiometriaRef.current || !camaraBiometriaActiva) return;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 300;
+      canvas.height = 300;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        const vWidth = videoBiometriaRef.current.videoWidth || 300;
+        const vHeight = videoBiometriaRef.current.videoHeight || 300;
+        const size = Math.min(vWidth, vHeight);
+        const startX = (vWidth - size) / 2;
+        const startY = (vHeight - size) / 2;
+        ctx.drawImage(videoBiometriaRef.current, startX, startY, size, size, 0, 0, 300, 300);
+
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+        const resExtraccion = generarDescriptorFacialDesdeCanvas(canvas);
+
+        if (resExtraccion.exito && resExtraccion.descriptor) {
+          setNuevaFotoFacial(resExtraccion.fotoThumbnail || dataUrl);
+          setNuevoDescriptorFacial(resExtraccion.descriptor);
+          detenerCamaraBiometria();
+          notify.success(
+            "Rostro Enrolado",
+            "Se generó el vector biométrico Face ID de 128 dimensiones con éxito."
+          );
+        } else {
+          notify.error("Error al capturar rostro", resExtraccion.error || "Rostro no detectado con suficiente claridad.");
+        }
+      }
+    } catch {
+      notify.error("Error al capturar muestra", "No se pudo procesar la imagen de la cámara.");
+    }
+  }
+
+  function procesarArchivoFacial(file: File) {
+    if (!file.type.startsWith("image/")) {
+      notify.error("Formato no válido", "Solo se admiten fotografías en JPG o PNG.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new (window as unknown as { Image: new () => HTMLImageElement }).Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 300;
+        canvas.height = 300;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          const size = Math.min(img.width, img.height);
+          const startX = (img.width - size) / 2;
+          const startY = (img.height - size) / 2;
+          ctx.drawImage(img, startX, startY, size, size, 0, 0, 300, 300);
+
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+          const resExtraccion = generarDescriptorFacialDesdeCanvas(canvas);
+
+          if (resExtraccion.exito && resExtraccion.descriptor) {
+            setNuevaFotoFacial(resExtraccion.fotoThumbnail || dataUrl);
+            setNuevoDescriptorFacial(resExtraccion.descriptor);
+            notify.success(
+              "Fotografía Procesada",
+              "Muestra biométrica extraída (vector de 128 dimensiones)."
+            );
+          } else {
+            notify.error("Foto no adecuada", resExtraccion.error || "No se detectó un rostro centrado.");
+          }
+        }
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -196,6 +349,22 @@ export function EmpleadoDialog({
           return;
         }
 
+        const empId = res.empleado.id;
+
+        // Si se capturó o actualizó muestra biométrica Face ID, guardarla en storage
+        if (nuevoDescriptorFacial && nuevaFotoFacial) {
+          try {
+            await guardarBiometriaFacialEmpleado({
+              empleadoId: empId,
+              descriptor: nuevoDescriptorFacial,
+              fotoThumbnail: nuevaFotoFacial,
+            });
+          } catch (biomErr) {
+            console.error("Aviso al guardar Face ID:", biomErr);
+          }
+        }
+
+        detenerCamaraBiometria();
         notify.success(
           esEdicion ? "Empleado actualizado" : "Empleado registrado",
           res.message || "Los datos se guardaron con éxito en la base de datos."
@@ -280,7 +449,10 @@ export function EmpleadoDialog({
           </button>
           <button
             type="button"
-            onClick={() => setPestañaActiva("acceso")}
+            onClick={() => {
+              detenerCamaraBiometria();
+              setPestañaActiva("acceso");
+            }}
             className={`pb-2 px-2.5 font-medium border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
               pestañaActiva === "acceso"
                 ? "border-zinc-900 text-zinc-900 font-semibold"
@@ -289,6 +461,24 @@ export function EmpleadoDialog({
           >
             <KeyRound className="h-3 w-3 text-zinc-400" />
             Acceso Online (PIN)
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              detenerCamaraBiometria();
+              setPestañaActiva("biometria");
+            }}
+            className={`pb-2 px-2.5 font-medium border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+              pestañaActiva === "biometria"
+                ? "border-zinc-900 text-zinc-900 font-semibold"
+                : "border-transparent text-zinc-500 hover:text-zinc-800"
+            }`}
+          >
+            <ScanFace className="h-3.5 w-3.5 text-emerald-600" />
+            Face ID & Biometría
+            {(biometriaEnroladaPrevia || nuevoDescriptorFacial) && (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+            )}
           </button>
         </div>
 
@@ -775,6 +965,172 @@ export function EmpleadoDialog({
             </div>
           )}
 
+          {/* PESTAÑA 4: FACE ID & BIOMETRÍA FACIAL */}
+          {pestañaActiva === "biometria" && (
+            <div className="space-y-4 animate-in fade-in duration-100">
+              <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/40 p-3.5 space-y-1">
+                <div className="flex items-center gap-2 text-emerald-900 font-semibold text-xs">
+                  <ScanFace className="h-4 w-4 text-emerald-600" />
+                  <span>Control Biométrico Anti-Fraude (Face ID)</span>
+                </div>
+                <p className="text-[11px] text-emerald-800/90 leading-relaxed">
+                  Genera una plantilla biométrica de 128 dimensiones basada en rasgos faciales. Esta muestra servirá para cotejo 1:1 estricto cada vez que el trabajador marque asistencia en el checador móvil, evitando suplantación o "buddy punching".
+                </p>
+              </div>
+
+              {/* Estado actual de biometría */}
+              <div className="rounded-xl border border-zinc-200 bg-[#F9F9FB] p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    {nuevaFotoFacial || fotoThumbnailPrevia ? (
+                      <div className="relative h-12 w-12 rounded-xl overflow-hidden border border-zinc-200 bg-zinc-900 shrink-0">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={nuevaFotoFacial || fotoThumbnailPrevia || ""}
+                          alt="Muestra Facial"
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    ) : (
+                      <div className="h-12 w-12 rounded-xl bg-zinc-100 border border-zinc-200 text-zinc-400 flex items-center justify-center shrink-0">
+                        <ScanFace className="h-6 w-6" strokeWidth={1.5} />
+                      </div>
+                    )}
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-semibold text-zinc-900">
+                          {nuevaFotoFacial
+                            ? "Nueva Muestra Capturada (Sin Guardar)"
+                            : biometriaEnroladaPrevia
+                            ? "Face ID Enrolado Activo"
+                            : "Sin Biometría Facial Registrada"}
+                        </h4>
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] ${
+                            nuevaFotoFacial
+                              ? "bg-blue-50 text-blue-700 border-blue-200"
+                              : biometriaEnroladaPrevia
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : "bg-zinc-100 text-zinc-600 border-zinc-200"
+                          }`}
+                        >
+                          {nuevaFotoFacial
+                            ? "Vector 128D Generado"
+                            : biometriaEnroladaPrevia
+                            ? "Activo 1:1"
+                            : "Pendiente"}
+                        </Badge>
+                      </div>
+                      <p className="text-[11px] text-zinc-500 mt-0.5">
+                        {nuevaFotoFacial
+                          ? "Haz clic en 'Guardar Cambios' para persistir el vector en el servidor seguro."
+                          : fechaEnrolamientoPrevia
+                          ? `Enrolado el ${new Date(fechaEnrolamientoPrevia).toLocaleDateString("es-MX")}`
+                          : "Captura el rostro del empleado para habilitar la protección anti-fraude."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Visor de cámara en vivo si está activa */}
+                {camaraBiometriaActiva && (
+                  <div className="pt-2 border-t border-zinc-200 space-y-3">
+                    <div className="relative w-48 h-48 mx-auto rounded-2xl overflow-hidden border-2 border-emerald-500 bg-zinc-950 flex items-center justify-center shadow-lg">
+                      <video
+                        ref={videoBiometriaRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover scale-x-[-1]"
+                      />
+                      {/* Retícula de escaneo */}
+                      <div className="absolute inset-2 rounded-xl border border-dashed border-emerald-400/60 pointer-events-none flex flex-col justify-between p-1.5">
+                        <div className="flex justify-between text-[8px] text-emerald-400 font-mono">
+                          <span>[ENROLL]</span>
+                          <span>[128D]</span>
+                        </div>
+                        <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent animate-pulse" />
+                        <div className="text-center text-[8px] text-emerald-400 font-mono">
+                          CENTRADO_FACIAL
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={capturarMuestraFacial}
+                        className="rounded-xl text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-xs"
+                      >
+                        <ScanFace className="h-3.5 w-3.5 mr-1.5" />
+                        Capturar Muestra Facial
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={detenerCamaraBiometria}
+                        className="rounded-xl text-xs"
+                      >
+                        Cancelar Cámara
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {camaraBiometriaError && (
+                  <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>{camaraBiometriaError}</span>
+                  </div>
+                )}
+
+                {/* Acciones para iniciar captura o carga */}
+                {!camaraBiometriaActiva && (
+                  <div className="pt-2 border-t border-zinc-200 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={iniciarCamaraBiometria}
+                      className="rounded-xl text-xs flex items-center gap-1.5 hover:bg-zinc-100"
+                    >
+                      <Camera className="h-3.5 w-3.5 text-zinc-600" />
+                      {biometriaEnroladaPrevia || nuevaFotoFacial
+                        ? "Re-capturar con Cámara"
+                        : "Abrir Cámara Web"}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="rounded-xl text-xs flex items-center gap-1.5 hover:bg-zinc-100"
+                    >
+                      <UploadCloud className="h-3.5 w-3.5 text-zinc-600" />
+                      Cargar Foto Facial (JPG/PNG)
+                    </Button>
+
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      accept="image/jpeg,image/png"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) procesarArchivoFacial(file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Botones de acción */}
           <div className="flex items-center justify-between pt-4 border-t border-zinc-100">
             <div className="flex gap-1.5">
@@ -783,22 +1139,28 @@ export function EmpleadoDialog({
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() =>
-                    setPestañaActiva(pestañaActiva === "acceso" ? "fiscal" : "general")
-                  }
+                  onClick={() => {
+                    detenerCamaraBiometria();
+                    if (pestañaActiva === "biometria") setPestañaActiva("acceso");
+                    else if (pestañaActiva === "acceso") setPestañaActiva("fiscal");
+                    else setPestañaActiva("general");
+                  }}
                   className="rounded-xl text-xs"
                 >
                   Anterior
                 </Button>
               )}
-              {pestañaActiva !== "acceso" && (
+              {pestañaActiva !== "biometria" && (
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() =>
-                    setPestañaActiva(pestañaActiva === "general" ? "fiscal" : "acceso")
-                  }
+                  onClick={() => {
+                    detenerCamaraBiometria();
+                    if (pestañaActiva === "general") setPestañaActiva("fiscal");
+                    else if (pestañaActiva === "fiscal") setPestañaActiva("acceso");
+                    else setPestañaActiva("biometria");
+                  }}
                   className="rounded-xl text-xs"
                 >
                   Siguiente
