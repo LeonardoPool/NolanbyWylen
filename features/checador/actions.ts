@@ -21,6 +21,7 @@ import {
   obtenerBiometriaFacialEmpleado,
   guardarBiometriaFacialEmpleado,
 } from "@/features/empleados/actions";
+import { obtenerHorarioLaboralConfig } from "@/features/configuracion/actions";
 import type { Database, Json } from "@/types/database.types";
 
 export type EmpleadoRow = Database["public"]["Tables"]["empleados"]["Row"];
@@ -756,4 +757,138 @@ export async function obtenerIncidenciasEmpleado(
 
   if (error || !data) return [];
   return data;
+}
+
+export interface FaltaDetectada {
+  fecha: string; // YYYY-MM-DD
+  fechaFormateada: string;
+  diaSemana: string;
+  turno: string;
+  motivoSugerido: string;
+}
+
+/**
+ * Detecta inasistencias injustificadas del empleado en los últimos 30 días laborales
+ * tomando en cuenta el horario laboral oficial, días de descanso y festivos.
+ */
+export async function obtenerFaltasDetectadasEmpleado(
+  empleadoId: string
+): Promise<FaltaDetectada[]> {
+  try {
+    if (!empleadoId) return [];
+
+    const adminClient = createAdminClient();
+    const hoyMerida = obtenerFechaHoyMerida();
+    const horario = await obtenerHorarioLaboralConfig();
+
+    // Rango de análisis: últimos 30 días naturales
+    const hace30Dias = new Date();
+    hace30Dias.setDate(hace30Dias.getDate() - 30);
+    const hace30DiasStr = obtenerFechaHoyMerida(hace30Dias);
+
+    // 1. Días festivos oficiales en ese periodo
+    const { data: festivos } = await adminClient
+      .from("dias_festivos_oficiales")
+      .select("fecha")
+      .gte("fecha", hace30DiasStr)
+      .lte("fecha", hoyMerida);
+
+    const festivosSet = new Set((festivos || []).map((f) => f.fecha));
+
+    // 2. Marcajes de asistencia del empleado en los últimos 30 días
+    const fechaInicioIso = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: asistencias } = await adminClient
+      .from("asistencias")
+      .select("fecha_hora")
+      .eq("empleado_id", empleadoId)
+      .gte("fecha_hora", fechaInicioIso);
+
+    const diasConAsistencia = new Set<string>();
+    if (asistencias) {
+      for (const a of asistencias) {
+        diasConAsistencia.add(obtenerFechaHoyMerida(a.fecha_hora));
+      }
+    }
+
+    // 3. Incidencias registradas (aprobadas o pendientes) en los últimos 30 días
+    const { data: incidencias } = await adminClient
+      .from("incidencias_empleado")
+      .select("fecha_inicio, fecha_fin, estado")
+      .eq("empleado_id", empleadoId)
+      .in("estado", ["APROBADA", "PENDIENTE"]);
+
+    const diasConIncidencia = new Set<string>();
+    if (incidencias) {
+      for (const inc of incidencias) {
+        // Expandir rango de fechas
+        let actual = new Date(inc.fecha_inicio + "T12:00:00Z");
+        const fin = new Date(inc.fecha_fin + "T12:00:00Z");
+        while (actual <= fin) {
+          diasConIncidencia.add(actual.toISOString().slice(0, 10));
+          actual.setDate(actual.getDate() + 1);
+        }
+      }
+    }
+
+    // 4. Evaluar día por día hacia atrás desde ayer
+    const faltasDetectadas: FaltaDetectada[] = [];
+    const DIAS_NOMBRES = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+
+    for (let offset = 1; offset <= 30; offset++) {
+      const fechaCursor = new Date();
+      fechaCursor.setDate(fechaCursor.getDate() - offset);
+      const fechaStr = obtenerFechaHoyMerida(fechaCursor);
+
+      // Si es festivo oficial, no es falta
+      if (festivosSet.has(fechaStr)) continue;
+
+      // Obtener día de la semana
+      const diaSemanaNum = fechaCursor.getDay(); // 0 = Domingo, 6 = Sábado
+
+      // Días de descanso configurados
+      const diasDescanso = horario.finDeSemana.diasDescanso || [horario.finDeSemana.diaDescansoSemanal];
+      if (diasDescanso.includes(diaSemanaNum)) continue;
+
+      let esLaborable = false;
+      let turno = "";
+
+      if ((horario.semanal.dias || []).includes(diaSemanaNum)) {
+        esLaborable = true;
+        turno = `${horario.semanal.horaEntrada} a ${horario.semanal.horaSalida}`;
+      } else if ((horario.finDeSemana.dias || []).includes(diaSemanaNum)) {
+        esLaborable = true;
+        turno = `${horario.finDeSemana.horaEntradaSabado} a ${horario.finDeSemana.horaSalidaSabado}`;
+      }
+
+      if (!esLaborable) continue;
+
+      // Si ya tiene asistencia registrada, no es falta
+      if (diasConAsistencia.has(fechaStr)) continue;
+
+      // Si ya tiene justificación o vacaciones en trámite/aprobadas, no es falta
+      if (diasConIncidencia.has(fechaStr)) continue;
+
+      // Formato legible en español
+      const diaNombre = DIAS_NOMBRES[diaSemanaNum];
+      const fechaFormateada = fechaCursor.toLocaleDateString("es-MX", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        timeZone: "America/Merida",
+      });
+
+      faltasDetectadas.push({
+        fecha: fechaStr,
+        fechaFormateada: fechaFormateada.charAt(0).toUpperCase() + fechaFormateada.slice(1),
+        diaSemana: diaNombre,
+        turno,
+        motivoSugerido: `Justificación de inasistencia del ${diaNombre} ${fechaStr}`,
+      });
+    }
+
+    return faltasDetectadas;
+  } catch (err) {
+    console.error("[Checador] Error al detectar faltas del empleado:", err);
+    return [];
+  }
 }

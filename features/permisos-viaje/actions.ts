@@ -222,6 +222,14 @@ export async function eliminarPermisoExtraordinario(
 
   try {
     const adminClient = createAdminClient();
+
+    // Obtener datos antes de eliminar para la bitácora
+    const { data: permisoPrevio } = await adminClient
+      .from("ubicaciones_extraordinarias")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
     const { error } = await adminClient
       .from("ubicaciones_extraordinarias")
       .delete()
@@ -231,9 +239,20 @@ export async function eliminarPermisoExtraordinario(
       return { success: false, error: "No se pudo revocar la ubicación." };
     }
 
+    // Auditoría
+    await adminClient.from("registros_auditoria").insert({
+      perfil_id: user.id,
+      accion: "ELIMINACION_UBICACION_EXTRAORDINARIA",
+      tabla_afectada: "ubicaciones_extraordinarias",
+      registro_afectado_id: id,
+      valores_previos: (permisoPrevio as unknown as Json) ?? null,
+      valores_nuevos: null,
+    });
+
     revalidatePath("/configuracion");
     revalidatePath("/empleados");
     revalidatePath("/checador");
+    revalidatePath("/bitacora");
 
     return { success: true };
   } catch (err) {

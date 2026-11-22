@@ -15,6 +15,7 @@ import {
   ClipboardList,
   CalendarDays,
   BarChart3,
+  ScrollText,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { cerrarSesion } from "@/features/auth/actions";
@@ -55,6 +56,11 @@ const navigationItems = [
     name: "Reportes",
     href: "/reportes",
     icon: FileText,
+  },
+  {
+    name: "Bitácora",
+    href: "/bitacora",
+    icon: ScrollText,
   },
   {
     name: "Configuración",

@@ -56,23 +56,26 @@ export const IncidenciaFormSchema = z
     }
 
     // 3. Reglas temporales por tipo de incidencia
-    if (data.tipo === "INCAPACIDAD") {
-      // Para incapacidad médica IMSS, se permiten fechas retroactivas de hasta 30 días
+    if (data.tipo === "INCAPACIDAD" || data.tipo === "FALTA_JUSTIFICADA") {
+      // Para incapacidad médica IMSS y faltas justificadas, se permiten fechas retroactivas de hasta 30 días
       const limiteRetroactivo = sumarDiasAFecha(hoy, -30);
       if (compararFechasCalendario(data.fechaInicio, limiteRetroactivo) < 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["fechaInicio"],
-          message: "Las solicitudes de incapacidad médica no pueden exceder 30 días de retroactividad.",
+          message:
+            data.tipo === "INCAPACIDAD"
+              ? "Las solicitudes de incapacidad médica no pueden exceder 30 días de retroactividad."
+              : "La justificación de inasistencias no puede exceder 30 días de retroactividad.",
         });
       }
     } else {
-      // Para Vacaciones, Permisos y Faltas justificadas: la fecha inicial debe ser hoy o futura
+      // Para Vacaciones y Permisos anticipados: la fecha inicial debe ser hoy o futura
       if (compararFechasCalendario(data.fechaInicio, hoy) < 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["fechaInicio"],
-          message: "Para este tipo de solicitud no se permiten fechas pasadas. La fecha mínima es hoy.",
+          message: "Para solicitudes de vacaciones o permisos anticipados no se permiten fechas pasadas. La fecha mínima es hoy.",
         });
       }
     }

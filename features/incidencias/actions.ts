@@ -201,18 +201,35 @@ export async function resolverIncidenciaAdmin(params: {
     return { success: false, error: "No se pudo actualizar el estado de la solicitud en la base de datos." };
   }
 
-  // Registrar auditoría estricta
+  // Registrar auditoría estricta con acciones especializadas
+  const accionAuditoria =
+    incActual.tipo === "VACACIONES"
+      ? accion === "APROBADA"
+        ? "AUTORIZACION_VACACIONES"
+        : "RECHAZO_VACACIONES"
+      : incActual.tipo === "FALTA_JUSTIFICADA"
+      ? accion === "APROBADA"
+        ? "APROBACION_JUSTIFICANTE"
+        : "RECHAZO_JUSTIFICANTE"
+      : `RESOLUCION_INCIDENCIA_${accion}`;
+
   await adminClient.from("registros_auditoria").insert({
     perfil_id: user.id,
-    accion: `RESOLUCION_INCIDENCIA_${accion}`,
+    accion: accionAuditoria,
     tabla_afectada: "incidencias_empleado",
     registro_afectado_id: incidenciaId,
     valores_previos: {
       estado: incActual.estado,
       documento_estado: incActual.documento_estado,
+      tipo: incActual.tipo,
+      fecha_inicio: incActual.fecha_inicio,
+      fecha_fin: incActual.fecha_fin,
     } as unknown as Json,
     valores_nuevos: {
       estado: accion,
+      tipo: incActual.tipo,
+      fecha_inicio: incActual.fecha_inicio,
+      fecha_fin: incActual.fecha_fin,
       comentario: comentarioLimpio,
       documento_estado: nuevoDocEstado,
       revisor: `${perfil.nombre} ${perfil.apellidos}`.trim(),
@@ -222,6 +239,7 @@ export async function resolverIncidenciaAdmin(params: {
   revalidatePath("/incidencias");
   revalidatePath("/dashboard");
   revalidatePath("/asistencias");
+  revalidatePath("/bitacora");
 
   return {
     success: true,

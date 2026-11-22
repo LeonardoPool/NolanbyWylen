@@ -465,6 +465,7 @@ export async function actualizarHorarioLaboralConfig(
     }
 
     const adminClient = createAdminClient();
+    const configActual = await obtenerHorarioLaboralConfig();
 
     // Asegurar que el bucket privado exista
     await adminClient.storage.createBucket(BUCKET_CONFIG, { public: false }).catch(() => {});
@@ -495,10 +496,21 @@ export async function actualizarHorarioLaboralConfig(
       })
       .neq("id", "00000000-0000-0000-0000-000000000000");
 
+    // Bitácora de auditoría inmutable
+    await adminClient.from("registros_auditoria").insert({
+      perfil_id: user.id,
+      accion: "CAMBIO_HORARIO_LABORAL",
+      tabla_afectada: "configuracion_taller",
+      registro_afectado_id: null,
+      valores_previos: (configActual as unknown as Json) ?? null,
+      valores_nuevos: nuevaConfig as unknown as Json,
+    });
+
     revalidatePath("/configuracion");
     revalidatePath("/dashboard");
     revalidatePath("/analytics");
     revalidatePath("/reportes");
+    revalidatePath("/bitacora");
 
     return {
       success: true,

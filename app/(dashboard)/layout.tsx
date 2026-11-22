@@ -14,6 +14,7 @@ const RUTAS_PREFETCH_MOVIL = [
   "/incidencias",
   "/vacaciones",
   "/reportes",
+  "/bitacora",
   "/configuracion",
 ];
 

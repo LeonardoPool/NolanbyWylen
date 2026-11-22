@@ -39,6 +39,8 @@ import {
   registrarIncidencia,
   obtenerIncidenciasEmpleado,
   enrolarFaceIdInicial,
+  obtenerFaltasDetectadasEmpleado,
+  type FaltaDetectada,
   type EmpleadoRow,
   type ConfiguracionTallerRow,
   type AsistenciaRow,
@@ -52,13 +54,33 @@ import {
 } from "@/lib/biometria/face-id-engine";
 
 export function PortalEmpleado() {
-  // Sesión local del empleado
+  // Sesión persistida del empleado
   const [empleado, setEmpleado] = useState<EmpleadoRow | null>(null);
   const [configuracion, setConfiguracion] = useState<ConfiguracionTallerRow | null>(null);
   const [permisosViaje, setPermisosViaje] = useState<UbicacionExtraordinariaRow[]>([]);
   const [tieneBiometriaFacial, setTieneBiometriaFacial] = useState(false);
   const [modalEnrolamientoFacial, setModalEnrolamientoFacial] = useState(false);
   const [enrolandoFaceId, setEnrolandoFaceId] = useState(false);
+
+  // Recuperar sesión persistente de forma segura al montar el componente
+  useEffect(() => {
+    try {
+      const guardado = localStorage.getItem("nolan_empleado_session");
+      if (guardado) {
+        const parsed = JSON.parse(guardado);
+        if (parsed.empleado?.id) {
+          setEmpleado(parsed.empleado);
+          if (parsed.configuracion) setConfiguracion(parsed.configuracion);
+          if (Array.isArray(parsed.permisosViaje)) setPermisosViaje(parsed.permisosViaje);
+          if (typeof parsed.tieneBiometriaFacial === "boolean") {
+            setTieneBiometriaFacial(parsed.tieneBiometriaFacial);
+          }
+        }
+      }
+    } catch {
+      // Continuar silenciosamente si localStorage no está disponible
+    }
+  }, []);
 
   // Form login
   const [identificador, setIdentificador] = useState("");
@@ -82,6 +104,11 @@ export function PortalEmpleado() {
   const [asistenciasHoy, setAsistenciasHoy] = useState<AsistenciaRow[]>([]);
   const [incidencias, setIncidencias] = useState<IncidenciaRow[]>([]);
   const [isMarking, startMarkingTransition] = useTransition();
+
+  // Inasistencias detectadas para facilitar justificación
+  const [faltasDetectadas, setFaltasDetectadas] = useState<FaltaDetectada[]>([]);
+  const [cargandoFaltas, setCargandoFaltas] = useState(false);
+  const [faltaSeleccionada, setFaltaSeleccionada] = useState<string | null>(null);
 
   // Modal Incidencias
   const [modalIncidencia, setModalIncidencia] = useState(false);
@@ -115,14 +142,41 @@ export function PortalEmpleado() {
     }
   }, []);
 
+  // Consultar faltas detectadas automáticamente al abrir modal de incidencias
+  useEffect(() => {
+    if (empleado && modalIncidencia && tipoIncidencia === "FALTA_JUSTIFICADA") {
+      setCargandoFaltas(true);
+      obtenerFaltasDetectadasEmpleado(empleado.id)
+        .then((faltas) => {
+          setFaltasDetectadas(faltas);
+        })
+        .finally(() => setCargandoFaltas(false));
+    }
+  }, [empleado, modalIncidencia, tipoIncidencia]);
+
+  const seleccionarFaltaParaJustificar = (falta: FaltaDetectada) => {
+    setFaltaSeleccionada(falta.fecha);
+    setFechaInicio(falta.fecha);
+    setFechaFin(falta.fecha);
+    setMotivo(falta.motivoSugerido);
+  };
+
   const minFechaInicio = React.useMemo(() => {
     if (!hoyMerida) return undefined;
-    if (tipoIncidencia === "INCAPACIDAD") {
+    if (tipoIncidencia === "INCAPACIDAD" || tipoIncidencia === "FALTA_JUSTIFICADA") {
       const [y, m, d] = hoyMerida.split("-").map(Number);
       const retro = new Date(Date.UTC(y, m - 1, d - 30));
       return retro.toISOString().slice(0, 10);
     }
     return hoyMerida;
+  }, [tipoIncidencia, hoyMerida]);
+
+  const maxFechaInicio = React.useMemo(() => {
+    if (!hoyMerida) return undefined;
+    if (tipoIncidencia === "FALTA_JUSTIFICADA") {
+      return hoyMerida;
+    }
+    return undefined;
   }, [tipoIncidencia, hoyMerida]);
 
   const minFechaFin = fechaInicio || minFechaInicio;
@@ -384,6 +438,21 @@ export function PortalEmpleado() {
       const tieneBio = Boolean(res.tieneBiometriaFacial);
       setTieneBiometriaFacial(tieneBio);
 
+      // Persistir sesión de manera segura para evitar que recargas o diálogos de permisos expulsen al empleado
+      try {
+        localStorage.setItem(
+          "nolan_empleado_session",
+          JSON.stringify({
+            empleado: res.empleado,
+            configuracion: res.configuracion,
+            permisosViaje: res.permisosViaje || [],
+            tieneBiometriaFacial: tieneBio,
+          })
+        );
+      } catch {
+        // Continuar si storage está deshabilitado
+      }
+
       if (!tieneBio) {
         notify.warning(
           "Face ID Requerido",
@@ -395,6 +464,20 @@ export function PortalEmpleado() {
         notify.success("Bienvenido", `Hola, ${res.empleado.nombre}`);
       }
     });
+  }
+
+  // Cerrar sesión del empleado y limpiar caché local
+  function handleCerrarSesion() {
+    try {
+      localStorage.removeItem("nolan_empleado_session");
+    } catch {}
+    setEmpleado(null);
+    setConfiguracion(null);
+    setPermisosViaje([]);
+    setAsistenciasHoy([]);
+    setIncidencias([]);
+    setCoords(null);
+    detenerCamara();
   }
 
   // Capturar y enrolar Face ID inicial para cuentas sin modelo registrado
@@ -450,6 +533,14 @@ export function PortalEmpleado() {
       }
 
       setTieneBiometriaFacial(true);
+      try {
+        const guardado = localStorage.getItem("nolan_empleado_session");
+        if (guardado) {
+          const parsed = JSON.parse(guardado);
+          parsed.tieneBiometriaFacial = true;
+          localStorage.setItem("nolan_empleado_session", JSON.stringify(parsed));
+        }
+      } catch {}
       detenerCamara();
       setModalEnrolamientoFacial(false);
       notify.success(
@@ -767,15 +858,15 @@ export function PortalEmpleado() {
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="h-8 w-8 rounded-full bg-zinc-900 text-white flex items-center justify-center font-bold text-xs shrink-0">
-              {empleado.nombre.charAt(0)}
-              {empleado.apellidos.charAt(0)}
+              {(empleado.nombre || "E").charAt(0)}
+              {(empleado.apellidos || "").charAt(0)}
             </div>
             <div>
               <p className="text-xs font-bold text-zinc-900 leading-tight">
-                {empleado.nombre} {empleado.apellidos}
+                {empleado.nombre} {empleado.apellidos || ""}
               </p>
               <div className="flex items-center gap-1.5 mt-0.5">
-                <span className="text-[10px] text-zinc-500 font-medium">{empleado.puesto}</span>
+                <span className="text-[10px] text-zinc-500 font-medium">{empleado.puesto || "Personal"}</span>
                 {tieneBiometriaFacial ? (
                   <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-800 border-emerald-200 flex items-center gap-0.5 font-medium">
                     <ScanFace className="h-2.5 w-2.5 text-emerald-600" /> Face ID Activo
@@ -803,8 +894,8 @@ export function PortalEmpleado() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setEmpleado(null)}
-            className="h-7 px-2.5 text-[11px] text-zinc-600 rounded-lg"
+            onClick={handleCerrarSesion}
+            className="h-7 px-2.5 text-[11px] text-zinc-600 rounded-lg cursor-pointer"
           >
             Salir
           </Button>
@@ -1130,6 +1221,80 @@ export function PortalEmpleado() {
                   </select>
                 </div>
 
+                {/* Detector Inteligente de Faltas (Facilita elegir inasistencias automáticamente) */}
+                {tipoIncidencia === "FALTA_JUSTIFICADA" && (
+                  <div className="space-y-2.5 p-3.5 bg-amber-50/70 rounded-2xl border border-amber-200/90 text-xs animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 font-bold text-amber-950">
+                        <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                        <span>Inasistencias Detectadas en tus Turnos</span>
+                      </div>
+                      {cargandoFaltas ? (
+                        <div className="flex items-center gap-1 text-[10px] text-amber-700">
+                          <Loader2 className="h-3 w-3 animate-spin text-amber-600" />
+                          <span>Analizando...</span>
+                        </div>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] bg-amber-100 text-amber-900 border-amber-300">
+                          {faltasDetectadas.length} encontrada{faltasDetectadas.length === 1 ? "" : "s"}
+                        </Badge>
+                      )}
+                    </div>
+
+                    <p className="text-[11px] text-amber-800 leading-snug">
+                      El sistema detectó los siguientes turnos oficiales sin registro de asistencia. Toca uno para llenar la justificación con un solo toque:
+                    </p>
+
+                    {cargandoFaltas ? (
+                      <div className="py-3 text-center text-zinc-400 text-xs">
+                        Consultando calendario oficial de asistencia...
+                      </div>
+                    ) : faltasDetectadas.length === 0 ? (
+                      <div className="p-2.5 rounded-xl bg-white/90 border border-amber-200 text-[11px] text-zinc-600 flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <span>No tienes inasistencias pendientes en tus últimos 30 días laborables. Si deseas justificar otra fecha, selecciónala abajo.</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                        {faltasDetectadas.map((falta) => {
+                          const seleccionada = faltaSeleccionada === falta.fecha;
+                          return (
+                            <button
+                              key={falta.fecha}
+                              type="button"
+                              onClick={() => seleccionarFaltaParaJustificar(falta)}
+                              className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between gap-2 transition-all cursor-pointer ${
+                                seleccionada
+                                  ? "bg-amber-100/90 border-amber-400 text-amber-950 ring-2 ring-amber-400/30 font-semibold"
+                                  : "bg-white hover:bg-amber-50/80 border-amber-200 text-zinc-800"
+                              }`}
+                            >
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-zinc-900 leading-tight">
+                                  {falta.fechaFormateada}
+                                </p>
+                                <p className="text-[10px] text-zinc-500 font-mono mt-0.5">
+                                  Horario oficial: {falta.turno}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {seleccionada ? (
+                                  <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-800 border-emerald-300 font-bold">
+                                    Seleccionada
+                                  </Badge>
+                                ) : (
+                                  <span className="text-[10px] text-amber-700 font-medium">Elegir</span>
+                                )}
+                                <ChevronRight className="h-3.5 w-3.5 text-zinc-400" />
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* 2. Selectores de Fechas (En móvil vertical espaciado, en tablet/escritorio 2 columnas) */}
                 <div className="space-y-1.5">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
@@ -1144,11 +1309,17 @@ export function PortalEmpleado() {
                             Retroactivo máx 30d
                           </span>
                         )}
+                        {tipoIncidencia === "FALTA_JUSTIFICADA" && (
+                          <span className="text-[10px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                            Inasistencia previa
+                          </span>
+                        )}
                       </div>
                       <input
                         type="date"
                         required
                         min={minFechaInicio}
+                        max={maxFechaInicio}
                         value={fechaInicio}
                         onChange={(e) => {
                           setFechaInicio(e.target.value);
@@ -1169,6 +1340,7 @@ export function PortalEmpleado() {
                         type="date"
                         required
                         min={minFechaFin}
+                        max={maxFechaInicio}
                         value={fechaFin}
                         onChange={(e) => setFechaFin(e.target.value)}
                         className="w-full min-h-[46px] rounded-xl border border-zinc-200 bg-[#F9F9FB] px-3.5 py-2.5 text-base sm:text-xs text-zinc-900 focus:bg-white focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/5 transition-all font-mono"
