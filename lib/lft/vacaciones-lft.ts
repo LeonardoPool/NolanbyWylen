@@ -34,7 +34,7 @@ export function calcularDiasPorAnioServicioLFT(aniosCumplidos: number): number {
  * Los derechos se generan ÚNICAMENTE al cumplir el aniversario, NUNCA por año calendario.
  */
 export function calcularAniversariosCumplidos(
-  fechaIngresoYmd: string,
+  fechaIngresoYmd: string | null | undefined,
   fechaReferenciaYmd?: string
 ): {
   aniosCumplidos: number;
@@ -43,8 +43,31 @@ export function calcularAniversariosCumplidos(
   diasParaProximoAniversario: number;
 } {
   const hoy = fechaReferenciaYmd || obtenerFechaHoyMerida();
-  const [yIngreso, mIngreso, dIngreso] = fechaIngresoYmd.split("-").map(Number);
-  const [yHoy, mHoy, dHoy] = hoy.split("-").map(Number);
+
+  if (!fechaIngresoYmd || typeof fechaIngresoYmd !== "string") {
+    return {
+      aniosCumplidos: 0,
+      fechaUltimoAniversario: null,
+      fechaProximoAniversario: hoy,
+      diasParaProximoAniversario: 0,
+    };
+  }
+
+  // Sanitizar por si viene con timestamp ISO (ej. 2024-05-10T00:00:00Z)
+  const fechaLimpia = fechaIngresoYmd.split("T")[0].trim();
+  const partes = fechaLimpia.split("-").map(Number);
+  if (partes.length < 3 || partes.some(isNaN)) {
+    return {
+      aniosCumplidos: 0,
+      fechaUltimoAniversario: null,
+      fechaProximoAniversario: hoy,
+      diasParaProximoAniversario: 0,
+    };
+  }
+
+  const [yIngreso, mIngreso, dIngreso] = partes;
+  const hoyPartes = hoy.split("-").map(Number);
+  const yHoy = hoyPartes[0];
 
   let anios = yHoy - yIngreso;
 
@@ -66,7 +89,8 @@ export function calcularAniversariosCumplidos(
 
   // Próximo aniversario
   const fechaProximoAniversario = `${yIngreso + aniosCumplidos + 1}-${mStr}-${dStr}`;
-  const diasParaProximo = Math.max(0, calcularDiasEntreFechas(hoy, fechaProximoAniversario) - 1);
+  const diasCalculados = calcularDiasEntreFechas(hoy, fechaProximoAniversario);
+  const diasParaProximo = isNaN(diasCalculados) ? 0 : Math.max(0, diasCalculados - 1);
 
   return {
     aniosCumplidos,

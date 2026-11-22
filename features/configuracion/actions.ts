@@ -122,10 +122,10 @@ export async function actualizarConfiguracionTaller(
     return { success: false, error: "Las coordenadas de latitud o longitud no son válidas." };
   }
 
-  if (isNaN(radio_tolerancia_metros) || radio_tolerancia_metros < 10 || radio_tolerancia_metros > 5000) {
+  if (isNaN(radio_tolerancia_metros) || radio_tolerancia_metros < 2 || radio_tolerancia_metros > 150) {
     return {
       success: false,
-      error: "El radio de tolerancia debe ser un valor entre 10 y 5000 metros.",
+      error: "El radio de tolerancia debe ser un valor entre 2 y 150 metros.",
     };
   }
 

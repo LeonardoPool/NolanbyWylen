@@ -34,19 +34,19 @@ function VacacionesSkeleton() {
 
 async function VacacionesContenido() {
   await connection();
-  const { fichas, error } = await obtenerFichasVacacionalesAdmin();
+  const { fichas, esAdmin, error } = await obtenerFichasVacacionalesAdmin();
 
   if (error === "Sesión no válida o expirada.") {
     redirect("/login");
   }
 
-  if (error === "Acceso exclusivo para administradores.") {
-    redirect("/dashboard");
-  }
-
   return (
     <div className="py-2">
-      <VacacionesVista fichasIniciales={fichas || []} />
+      <VacacionesVista
+        fichasIniciales={fichas || []}
+        esAdmin={esAdmin ?? false}
+        errorInicial={error}
+      />
     </div>
   );
 }

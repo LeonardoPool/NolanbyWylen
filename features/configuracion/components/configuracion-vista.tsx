@@ -355,7 +355,7 @@ export function ConfiguracionVista({
 
   const numLat = parseFloat(latitud) || 19.432608;
   const numLng = parseFloat(longitud) || -99.133209;
-  const numRadio = parseInt(radioTolerancia, 10) || 150;
+  const numRadio = Math.min(150, Math.max(2, parseInt(radioTolerancia, 10) || 150));
 
   return (
     <div className="space-y-8 max-w-5xl">
@@ -468,14 +468,14 @@ export function ConfiguracionVista({
                     <label className="text-[11px] font-medium text-zinc-600">
                       Radio de Tolerancia ({numRadio} m)
                     </label>
-                    <span className="text-[10px] text-zinc-400 font-mono">10m - 2000m</span>
+                    <span className="text-[10px] text-zinc-400 font-mono">2m - 150m</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
                       type="range"
-                      min={20}
-                      max={1000}
-                      step={10}
+                      min={2}
+                      max={150}
+                      step={1}
                       value={numRadio}
                       onChange={(e) => setRadioTolerancia(e.target.value)}
                       disabled={!esAdmin || isPending}
@@ -483,8 +483,8 @@ export function ConfiguracionVista({
                     />
                     <input
                       type="number"
-                      min={10}
-                      max={5000}
+                      min={2}
+                      max={150}
                       required
                       value={radioTolerancia}
                       onChange={(e) => setRadioTolerancia(e.target.value)}

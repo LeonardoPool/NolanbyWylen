@@ -126,7 +126,10 @@ export async function crearPermisoExtraordinario(
   const direccion = String(formData.get("direccion") || "").trim();
   const latitud = parseFloat(String(formData.get("latitud") || ""));
   const longitud = parseFloat(String(formData.get("longitud") || ""));
-  const radio_tolerancia_metros = parseInt(String(formData.get("radio_tolerancia_metros") || "200"), 10);
+  const radio_tolerancia_metros = Math.min(
+    150,
+    Math.max(2, parseInt(String(formData.get("radio_tolerancia_metros") || "150"), 10))
+  );
   const fecha_inicio = String(formData.get("fecha_inicio") || obtenerFechaHoyMerida()).trim();
   const fecha_fin = String(formData.get("fecha_fin") || "").trim();
 

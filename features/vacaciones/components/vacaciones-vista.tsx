@@ -25,15 +25,21 @@ import { notify } from "@/lib/feedback/toast";
 import {
   registrarAjusteVacacionalAdmin,
   simularDiasHabilesVacaciones,
-  calcularDiasPorAnioServicioLFT,
   type FichaVacacionalEmpleado,
 } from "../actions";
+import { calcularDiasPorAnioServicioLFT } from "@/lib/lft/vacaciones-lft";
 
 interface VacacionesVistaProps {
   fichasIniciales: FichaVacacionalEmpleado[];
+  esAdmin?: boolean;
+  errorInicial?: string;
 }
 
-export function VacacionesVista({ fichasIniciales }: VacacionesVistaProps) {
+export function VacacionesVista({
+  fichasIniciales,
+  esAdmin = true,
+  errorInicial,
+}: VacacionesVistaProps) {
   const [fichas, setFichas] = useState<FichaVacacionalEmpleado[]>(fichasIniciales);
   const [fichaSeleccionada, setFichaSeleccionada] = useState<FichaVacacionalEmpleado | null>(
     fichasIniciales[0] || null
@@ -134,17 +140,25 @@ export function VacacionesVista({ fichasIniciales }: VacacionesVistaProps) {
           </p>
         </div>
 
-        {fichaSeleccionada && (
+        {fichaSeleccionada && esAdmin && (
           <Button
             size="sm"
             onClick={() => setModalAjuste(true)}
-            className="rounded-xl text-xs gap-1.5 shadow-2xs self-start sm:self-auto"
+            className="rounded-xl text-xs gap-1.5 shadow-2xs self-start sm:self-auto cursor-pointer"
           >
             <PlusCircle className="h-4 w-4" />
             Cargar Saldo / Ajuste Histórico
           </Button>
         )}
       </div>
+
+      {/* Alerta de Error si ocurre */}
+      {errorInicial && (
+        <div className="p-3.5 rounded-2xl border border-rose-200 bg-rose-50 text-xs text-rose-800 flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+          <span>{errorInicial}</span>
+        </div>
+      )}
 
       {/* Tarjeta Informativa LFT */}
       <Card className="rounded-2xl border-blue-200/80 bg-blue-50/30 shadow-2xs">
@@ -173,7 +187,12 @@ export function VacacionesVista({ fichasIniciales }: VacacionesVistaProps) {
             Plantilla Laboral ({fichas.length})
           </span>
 
-          <div className="space-y-2">
+          {fichas.length === 0 ? (
+            <Card className="rounded-2xl border-zinc-200 bg-white/70 p-6 text-center text-zinc-400 text-xs">
+              No hay empleados activos en el catálogo para consultar vacaciones.
+            </Card>
+          ) : (
+            <div className="space-y-2 max-h-[360px] lg:max-h-[calc(100vh-220px)] overflow-y-auto pr-1">
             {fichas.map((f) => {
               const esActivo = fichaSeleccionada?.empleadoId === f.empleadoId;
               return (
@@ -211,6 +230,7 @@ export function VacacionesVista({ fichasIniciales }: VacacionesVistaProps) {
               );
             })}
           </div>
+          )}
         </div>
 
         {/* Detalle de Ficha Vacacional Seleccionada */}
@@ -415,7 +435,7 @@ export function VacacionesVista({ fichasIniciales }: VacacionesVistaProps) {
       {/* Modal de Carga Histórica / Ajuste */}
       {modalAjuste && fichaSeleccionada && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="w-full max-w-sm rounded-2xl bg-white border border-zinc-200 shadow-2xl overflow-hidden">
+          <div className="w-full max-w-sm rounded-2xl bg-white border border-zinc-200 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-100 bg-[#FAFAFC]">
               <h3 className="text-xs font-bold text-zinc-900">Registrar Ajuste Vacacional</h3>
               <button

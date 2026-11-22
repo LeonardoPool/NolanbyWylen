@@ -15,11 +15,6 @@ import {
 } from "@/lib/lft/vacaciones-lft";
 import type { Database, Json } from "@/types/database.types";
 
-export {
-  calcularDiasPorAnioServicioLFT,
-  calcularAniversariosCumplidos,
-};
-
 export type AjusteVacacionesRow = Database["public"]["Tables"]["ajustes_vacaciones"]["Row"];
 
 export interface FichaVacacionalEmpleado {
@@ -164,43 +159,69 @@ export async function obtenerEstadoVacacionalEmpleado(
  */
 export async function obtenerFichasVacacionalesAdmin(): Promise<{
   fichas: FichaVacacionalEmpleado[];
+  esAdmin?: boolean;
   error?: string;
 }> {
   const supabase = await createClient();
-  const adminClient = createAdminClient();
 
-  // Ejecutar autenticación, verificación de perfil y consultas de datos en 1 sola tanda paralela (1 round-trip)
-  const [authRes, perfilesRes, empleadosRes, ajustesRes, incidenciasRes] = await Promise.all([
-    supabase.auth.getUser(),
-    adminClient.from("perfiles").select("id, rol, activo").eq("activo", true),
-    adminClient
-      .from("empleados")
-      .select("id, nombre, apellidos, numero_empleado, puesto, fecha_ingreso")
-      .eq("activo", true)
-      .order("numero_empleado"),
-    adminClient
-      .from("ajustes_vacaciones")
-      .select("*")
-      .order("fecha_creacion", { ascending: false }),
-    adminClient
-      .from("incidencias_empleado")
-      .select("empleado_id, dias_solicitados_efectivos, estado")
-      .eq("tipo", "VACACIONES"),
-  ]);
+  // 1. Validar autenticación de usuario
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
 
-  const user = authRes.data?.user;
-  if (!user) {
-    return { fichas: [], error: "Sesión no válida o expirada." };
+  if (authError || !user) {
+    return { fichas: [], esAdmin: false, error: "Sesión no válida o expirada." };
   }
 
-  const perfil = (perfilesRes.data || []).find((p) => p.id === user.id);
-  if (!perfil?.activo || perfil.rol !== "ADMINISTRADOR") {
-    return { fichas: [], error: "Acceso exclusivo para administradores." };
+  // 2. Determinar permisos del usuario actual directamente
+  let esAdmin = false;
+  try {
+    const { data: perfil } = await supabase
+      .from("perfiles")
+      .select("rol, activo")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (perfil?.rol === "ADMINISTRADOR") {
+      esAdmin = true;
+    }
+  } catch {
+    // Si no se puede leer el rol, se mantiene en falso
   }
 
-  if (empleadosRes.error || !empleadosRes.data) {
-    return { fichas: [], error: "No se pudo consultar el catálogo de empleados." };
+  // 3. Cliente con privilegios o fallback al cliente autenticado
+  let clientDb: any = supabase;
+  try {
+    clientDb = createAdminClient();
+  } catch {
+    clientDb = supabase;
   }
+
+  const hoy = obtenerFechaHoyMerida();
+
+  try {
+    // Consultar empleados, ajustes e incidencias
+    const [empleadosRes, ajustesRes, incidenciasRes] = await Promise.all([
+      clientDb
+        .from("empleados")
+        .select("id, nombre, apellidos, numero_empleado, puesto, fecha_ingreso")
+        .eq("activo", true)
+        .order("numero_empleado"),
+      clientDb
+        .from("ajustes_vacaciones")
+        .select("*")
+        .order("fecha_creacion", { ascending: false }),
+      clientDb
+        .from("incidencias_empleado")
+        .select("empleado_id, dias_solicitados_efectivos, estado")
+        .eq("tipo", "VACACIONES"),
+    ]);
+
+    if (empleadosRes.error || !empleadosRes.data) {
+      console.error("[Vacaciones] Error al consultar empleados:", empleadosRes.error);
+      return { fichas: [], esAdmin, error: "No se pudo consultar el catálogo de empleados." };
+    }
 
   // Indexar ajustes por empleado en memoria
   const ajustesMap = new Map<string, { lista: AjusteVacacionesRow[]; saldo: number }>();
@@ -235,54 +256,80 @@ export async function obtenerFichasVacacionalesAdmin(): Promise<{
   const hoy = obtenerFechaHoyMerida();
 
   // Cálculo en memoria determinista sin consultas SQL adicionales (O(N) CPU pura)
-  const fichas: FichaVacacionalEmpleado[] = empleadosRes.data.map((emp) => {
-    const infoAniversario = calcularAniversariosCumplidos(emp.fecha_ingreso, hoy);
+  const fichas: FichaVacacionalEmpleado[] = (empleadosRes.data || []).map((emp: any) => {
+    try {
+      const fechaIngresoSegura = emp.fecha_ingreso || hoy;
+      const infoAniversario = calcularAniversariosCumplidos(fechaIngresoSegura, hoy);
 
-    let diasDevengados = 0;
-    for (let a = 1; a <= infoAniversario.aniosCumplidos; a++) {
-      diasDevengados += calcularDiasPorAnioServicioLFT(a);
-    }
-
-    const ajInfo = ajustesMap.get(emp.id) || { lista: [], saldo: 0 };
-    const incInfo = incidenciasMap.get(emp.id) || { disfrutados: 0, reservados: 0 };
-
-    const saldoDisponible = Math.max(
-      0,
-      diasDevengados + ajInfo.saldo - incInfo.disfrutados - incInfo.reservados
-    );
-
-    let alertaPlazoArt81 = false;
-    let motivoAlertaArt81: string | undefined;
-
-    if (infoAniversario.fechaUltimoAniversario && saldoDisponible > 0) {
-      const fechaLimiteConcesion = sumarDiasAFecha(infoAniversario.fechaUltimoAniversario, 182);
-      if (compararFechasCalendario(hoy, fechaLimiteConcesion) > 0) {
-        alertaPlazoArt81 = true;
-        motivoAlertaArt81 = `El plazo legal de 6 meses posteriores al aniversario (${infoAniversario.fechaUltimoAniversario}) venció el ${fechaLimiteConcesion} conforme al Art. 81 de la LFT. Los días no se pierden pero deben programarse a la brevedad.`;
+      let diasDevengados = 0;
+      for (let a = 1; a <= infoAniversario.aniosCumplidos; a++) {
+        diasDevengados += calcularDiasPorAnioServicioLFT(a);
       }
-    }
 
-    return {
-      empleadoId: emp.id,
-      nombreCompleto: `${emp.nombre} ${emp.apellidos}`.trim(),
-      numeroEmpleado: emp.numero_empleado,
-      puesto: emp.puesto,
-      fechaIngreso: emp.fecha_ingreso,
-      aniosServicioCumplidos: infoAniversario.aniosCumplidos,
-      diasDevengadosLey: diasDevengados,
-      ajustesSaldo: ajInfo.saldo,
-      diasDisfrutados: incInfo.disfrutados,
-      diasReservadosPendientes: incInfo.reservados,
-      saldoDisponible,
-      fechaProximoAniversario: infoAniversario.fechaProximoAniversario,
-      diasParaProximoAniversario: infoAniversario.diasParaProximoAniversario,
-      alertaPlazoArt81,
-      motivoAlertaArt81,
-      ajustes: ajInfo.lista,
-    };
+      const ajInfo = ajustesMap.get(emp.id) || { lista: [], saldo: 0 };
+      const incInfo = incidenciasMap.get(emp.id) || { disfrutados: 0, reservados: 0 };
+
+      const saldoDisponible = Math.max(
+        0,
+        diasDevengados + ajInfo.saldo - incInfo.disfrutados - incInfo.reservados
+      );
+
+      let alertaPlazoArt81 = false;
+      let motivoAlertaArt81: string | undefined;
+
+      if (infoAniversario.fechaUltimoAniversario && saldoDisponible > 0) {
+        const fechaLimiteConcesion = sumarDiasAFecha(infoAniversario.fechaUltimoAniversario, 182);
+        if (compararFechasCalendario(hoy, fechaLimiteConcesion) > 0) {
+          alertaPlazoArt81 = true;
+          motivoAlertaArt81 = `El plazo legal de 6 meses posteriores al aniversario (${infoAniversario.fechaUltimoAniversario}) venció el ${fechaLimiteConcesion} conforme al Art. 81 de la LFT. Los días no se pierden pero deben programarse a la brevedad.`;
+        }
+      }
+
+      return {
+        empleadoId: emp.id,
+        nombreCompleto: `${emp.nombre || ""} ${emp.apellidos || ""}`.trim() || "Sin nombre",
+        numeroEmpleado: emp.numero_empleado || "S/N",
+        puesto: emp.puesto || "General",
+        fechaIngreso: emp.fecha_ingreso || hoy,
+        aniosServicioCumplidos: infoAniversario.aniosCumplidos,
+        diasDevengadosLey: diasDevengados,
+        ajustesSaldo: ajInfo.saldo,
+        diasDisfrutados: incInfo.disfrutados,
+        diasReservadosPendientes: incInfo.reservados,
+        saldoDisponible,
+        fechaProximoAniversario: infoAniversario.fechaProximoAniversario,
+        diasParaProximoAniversario: infoAniversario.diasParaProximoAniversario,
+        alertaPlazoArt81,
+        motivoAlertaArt81,
+        ajustes: ajInfo.lista,
+      };
+    } catch (errEmp) {
+      console.error("[Vacaciones] Error calculando empleado:", emp.id, errEmp);
+      return {
+        empleadoId: emp.id,
+        nombreCompleto: `${emp.nombre || ""} ${emp.apellidos || ""}`.trim() || "Sin nombre",
+        numeroEmpleado: emp.numero_empleado || "S/N",
+        puesto: emp.puesto || "General",
+        fechaIngreso: emp.fecha_ingreso || hoy,
+        aniosServicioCumplidos: 0,
+        diasDevengadosLey: 0,
+        ajustesSaldo: 0,
+        diasDisfrutados: 0,
+        diasReservadosPendientes: 0,
+        saldoDisponible: 0,
+        fechaProximoAniversario: hoy,
+        diasParaProximoAniversario: 0,
+        alertaPlazoArt81: false,
+        ajustes: [],
+      };
+    }
   });
 
-  return { fichas };
+  return { fichas, esAdmin };
+} catch (errGral) {
+  console.error("[Vacaciones] Error crítico obteniendo fichas:", errGral);
+  return { fichas: [], esAdmin, error: "Ocurrió un error inesperado al consultar los saldos vacacionales." };
+}
 }
 
 /**
@@ -391,9 +438,9 @@ export async function simularDiasHabilesVacaciones(
   domingosExcluidos: number;
 }> {
   const diasNaturales = Math.max(0, calcularDiasEntreFechas(fechaInicio, fechaFin));
-  const adminClient = createAdminClient();
 
   try {
+    const adminClient = createAdminClient();
     const { data: rpcDias, error } = await adminClient.rpc("dias_habiles_vacaciones", {
       fecha_inicio: fechaInicio,
       fecha_fin: fechaFin,
@@ -407,7 +454,7 @@ export async function simularDiasHabilesVacaciones(
       };
     }
   } catch {
-    // Fallback local determinista si la función RPC aún no está compilada en BD
+    // Fallback local determinista si la función RPC aún no está compilada en BD o adminClient falla
   }
 
   // Fallback TypeScript con exclusión de domingos (0)

@@ -46,7 +46,7 @@ export function PermisoViajeDialog({
   const [direccion, setDireccion] = useState("");
   const [latitud, setLatitud] = useState("19.432608");
   const [longitud, setLongitud] = useState("-99.133209");
-  const [radioMetros, setRadioMetros] = useState("200");
+  const [radioMetros, setRadioMetros] = useState("150");
 
   const [fechaInicio, setFechaInicio] = useState("");
   const [fechaFin, setFechaFin] = useState("");
@@ -326,15 +326,15 @@ export function PermisoViajeDialog({
               <label htmlFor="radio_tolerancia" className="font-medium text-zinc-700">
                 Radio de Tolerancia en el Destino ({radioMetros} metros)
               </label>
-              <span className="text-[10px] text-zinc-400">Recomendado: 200m - 500m</span>
+              <span className="text-[10px] text-zinc-400">Rango permitido: 2m - 150m</span>
             </div>
             <input
               id="radio_tolerancia"
               type="range"
-              min={50}
-              max={1500}
-              step={25}
-              value={radioMetros}
+              min={2}
+              max={150}
+              step={1}
+              value={Math.min(150, Math.max(2, parseInt(radioMetros, 10) || 150))}
               onChange={(e) => setRadioMetros(e.target.value)}
               disabled={isPending}
               className="w-full accent-blue-600 cursor-pointer"
