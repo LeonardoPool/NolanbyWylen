@@ -100,9 +100,21 @@ export function EmpleadoDialog({
   const [nuevaFotoFacial, setNuevaFotoFacial] = useState<string | null>(null);
   const [camaraBiometriaActiva, setCamaraBiometriaActiva] = useState(false);
   const [camaraBiometriaError, setCamaraBiometriaError] = useState<string | null>(null);
+  const [iniciandoCamara, setIniciandoCamara] = useState(false);
   const videoBiometriaRef = React.useRef<HTMLVideoElement | null>(null);
   const streamBiometriaRef = React.useRef<MediaStream | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  // Callback ref para vincular el stream al nodo de video inmediatamente al montarse en el DOM
+  const conectarVideoRef = React.useCallback((nodo: HTMLVideoElement | null) => {
+    videoBiometriaRef.current = nodo;
+    if (nodo && streamBiometriaRef.current) {
+      nodo.srcObject = streamBiometriaRef.current;
+      nodo.play().catch((err) => {
+        console.warn("[Biometría] Autoplay del video:", err);
+      });
+    }
+  }, []);
 
   // Control de Vacaciones Previas (para colaboradores con antigüedad acumulada)
   const [haTomadoVacaciones, setHaTomadoVacaciones] = useState<boolean | null>(null);
@@ -204,22 +216,62 @@ export function EmpleadoDialog({
 
   async function iniciarCamaraBiometria() {
     setCamaraBiometriaError(null);
+    setIniciandoCamara(true);
+
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setCamaraBiometriaError("Tu navegador o dispositivo no soporta captura de video en vivo.");
+      setIniciandoCamara(false);
+      return;
+    }
+
     try {
       if (streamBiometriaRef.current) {
         streamBiometriaRef.current.getTracks().forEach((t) => t.stop());
+        streamBiometriaRef.current = null;
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 640 } },
-        audio: false,
-      });
+
+      let stream: MediaStream;
+      try {
+        // Intento 1: frontal con resolución ideal
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 640 } },
+          audio: false,
+        });
+      } catch {
+        // Intento 2: fallback para webcams USB / laptops sin soporte del constraint facingMode
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+      }
+
       streamBiometriaRef.current = stream;
+
+      // Si el elemento video ya existe en el DOM, enlazarlo inmediatamente
       if (videoBiometriaRef.current) {
         videoBiometriaRef.current.srcObject = stream;
-        await videoBiometriaRef.current.play();
+        try {
+          await videoBiometriaRef.current.play();
+        } catch {
+          // Ignorar si autoplay requiere interacción
+        }
       }
+
       setCamaraBiometriaActiva(true);
-    } catch {
-      setCamaraBiometriaError("No se pudo iniciar la cámara. Verifica los permisos del navegador.");
+    } catch (err: any) {
+      console.error("[Biometría] Error al iniciar cámara:", err);
+      let mensaje = "No se pudo iniciar la cámara. Verifica los permisos del navegador.";
+      if (err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError") {
+        mensaje = "Permiso de cámara denegado. Permite el acceso a la cámara en los permisos de tu navegador.";
+      } else if (err?.name === "NotFoundError" || err?.name === "DevicesNotFoundError") {
+        mensaje = "No se detectó ninguna cámara web conectada en tu equipo.";
+      } else if (err?.name === "NotReadableError" || err?.name === "TrackStartError") {
+        mensaje = "La cámara está siendo utilizada por otra aplicación. Ciérrala e intenta de nuevo.";
+      }
+      setCamaraBiometriaError(mensaje);
+      setCamaraBiometriaActiva(false);
+    } finally {
+      setIniciandoCamara(false);
     }
   }
 
@@ -1038,7 +1090,7 @@ export function EmpleadoDialog({
                   <div className="pt-2 border-t border-zinc-200 space-y-3">
                     <div className="relative w-48 h-48 mx-auto rounded-2xl overflow-hidden border-2 border-emerald-500 bg-zinc-950 flex items-center justify-center shadow-lg">
                       <video
-                        ref={videoBiometriaRef}
+                        ref={conectarVideoRef}
                         autoPlay
                         playsInline
                         muted
@@ -1095,12 +1147,24 @@ export function EmpleadoDialog({
                       variant="outline"
                       size="sm"
                       onClick={iniciarCamaraBiometria}
-                      className="rounded-xl text-xs flex items-center gap-1.5 hover:bg-zinc-100"
+                      disabled={iniciandoCamara}
+                      className="rounded-xl text-xs flex items-center gap-1.5 hover:bg-zinc-100 cursor-pointer"
                     >
-                      <Camera className="h-3.5 w-3.5 text-zinc-600" />
-                      {biometriaEnroladaPrevia || nuevaFotoFacial
-                        ? "Re-capturar con Cámara"
-                        : "Abrir Cámara Web"}
+                      {iniciandoCamara ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-600" />
+                          <span>Iniciando Cámara...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Camera className="h-3.5 w-3.5 text-zinc-600" />
+                          <span>
+                            {biometriaEnroladaPrevia || nuevaFotoFacial
+                              ? "Re-capturar con Cámara"
+                              : "Abrir Cámara Web"}
+                          </span>
+                        </>
+                      )}
                     </Button>
 
                     <Button
