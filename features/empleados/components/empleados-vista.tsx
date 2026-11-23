@@ -21,16 +21,18 @@ import {
   X,
   UserCheck2,
   Users2,
+  ScanFace,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmpleadoDialog } from "./empleado-dialog";
 import { CambiarEstadoDialog } from "./cambiar-estado-dialog";
-import type { EmpleadoRow, RolUsuario } from "../actions";
+import type { EmpleadoRow, EmpleadoConBiometria, RolUsuario } from "../actions";
 
 interface EmpleadosVistaProps {
-  empleadosIniciales: EmpleadoRow[];
+  empleadosIniciales: EmpleadoConBiometria[];
   rolUsuario: RolUsuario;
   errorInicial?: string;
 }
@@ -44,17 +46,17 @@ export function EmpleadosVista({
   rolUsuario,
   errorInicial,
 }: EmpleadosVistaProps) {
-  const [empleados, setEmpleados] = useState<EmpleadoRow[]>(empleadosIniciales);
+  const [empleados, setEmpleados] = useState<EmpleadoConBiometria[]>(empleadosIniciales);
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>("activos");
   const [paginaActual, setPaginaActual] = useState(1);
 
   // Modals state
   const [modalFormAbierto, setModalFormAbierto] = useState(false);
-  const [empleadoAEditar, setEmpleadoAEditar] = useState<EmpleadoRow | null>(null);
+  const [empleadoAEditar, setEmpleadoAEditar] = useState<EmpleadoConBiometria | null>(null);
 
   const [modalBajaAbierto, setModalBajaAbierto] = useState(false);
-  const [empleadoACambiarEstado, setEmpleadoACambiarEstado] = useState<EmpleadoRow | null>(null);
+  const [empleadoACambiarEstado, setEmpleadoACambiarEstado] = useState<EmpleadoConBiometria | null>(null);
 
   const esAdmin = rolUsuario === "ADMINISTRADOR";
 
@@ -112,7 +114,7 @@ export function EmpleadosVista({
   }, [empleadosFiltrados, indiceInicio]);
 
   // Handlers para actualizar el estado local reactivamente
-  function handleGuardado(empleadoGuardado: EmpleadoRow, esNuevo: boolean) {
+  function handleGuardado(empleadoGuardado: EmpleadoConBiometria, esNuevo: boolean) {
     if (esNuevo) {
       setEmpleados((prev) => [empleadoGuardado, ...prev]);
     } else {
@@ -124,7 +126,11 @@ export function EmpleadosVista({
 
   function handleEstadoCambiado(empleadoActualizado: EmpleadoRow) {
     setEmpleados((prev) =>
-      prev.map((e) => (e.id === empleadoActualizado.id ? empleadoActualizado : e))
+      prev.map((e) =>
+        e.id === empleadoActualizado.id
+          ? { ...e, ...empleadoActualizado }
+          : e
+      )
     );
   }
 
@@ -133,12 +139,12 @@ export function EmpleadosVista({
     setModalFormAbierto(true);
   }
 
-  function abrirEditar(emp: EmpleadoRow) {
+  function abrirEditar(emp: EmpleadoConBiometria) {
     setEmpleadoAEditar(emp);
     setModalFormAbierto(true);
   }
 
-  function abrirCambiarEstado(emp: EmpleadoRow) {
+  function abrirCambiarEstado(emp: EmpleadoConBiometria) {
     setEmpleadoACambiarEstado(emp);
     setModalBajaAbierto(true);
   }
@@ -371,6 +377,7 @@ export function EmpleadosVista({
                       <th className="py-3 px-4">Clave Interna</th>
                       <th className="py-3 px-4">Puesto / Oficio</th>
                       <th className="py-3 px-4">ID Checador</th>
+                      <th className="py-3 px-4">Face ID & Biometría</th>
                       <th className="py-3 px-4">Fecha Ingreso</th>
                       <th className="py-3 px-4">Estatus</th>
                       <th className="py-3 px-4 text-right">Acciones</th>
@@ -435,6 +442,33 @@ export function EmpleadosVista({
                             <Fingerprint className="h-3 w-3 text-blue-600" strokeWidth={1.75} />
                             ID: {emp.codigo_biometrico}
                           </span>
+                        </td>
+
+                        {/* Estado Face ID / Biometría */}
+                        <td className="py-3.5 px-4">
+                          {emp.tieneBiometria ? (
+                            <Badge
+                              variant="outline"
+                              className="bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] inline-flex items-center gap-1 font-medium"
+                            >
+                              <ScanFace className="h-3 w-3 text-emerald-600 shrink-0" />
+                              <span>Face ID Activo</span>
+                            </Badge>
+                          ) : (
+                            <div className="space-y-0.5">
+                              <Badge
+                                variant="outline"
+                                className="bg-amber-50 text-amber-800 border-amber-300 text-[10px] inline-flex items-center gap-1 font-medium"
+                                title="Hace falta configurar el dato biométrico para que pueda checar su entrada y salida"
+                              >
+                                <AlertCircle className="h-3 w-3 text-amber-600 shrink-0" />
+                                <span>Biometría Pendiente</span>
+                              </Badge>
+                              <span className="text-[9px] text-amber-700 block leading-tight">
+                                Falta Face ID para checar
+                              </span>
+                            </div>
+                          )}
                         </td>
 
                         {/* Fecha de ingreso */}
@@ -526,6 +560,25 @@ export function EmpleadosVista({
                             {emp.nombre} {emp.apellidos}
                           </p>
                           <p className="text-[11px] text-zinc-500">{emp.puesto}</p>
+                          <div className="mt-1">
+                            {emp.tieneBiometria ? (
+                              <Badge
+                                variant="outline"
+                                className="bg-emerald-50 text-emerald-800 border-emerald-200 text-[9px] inline-flex items-center gap-1 font-medium"
+                              >
+                                <ScanFace className="h-2.5 w-2.5 text-emerald-600 shrink-0" />
+                                <span>Face ID Activo</span>
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="bg-amber-50 text-amber-800 border-amber-300 text-[9px] inline-flex items-center gap-1 font-medium"
+                              >
+                                <AlertCircle className="h-2.5 w-2.5 text-amber-600 shrink-0" />
+                                <span>Biometría Pendiente (Falta configurar para checar)</span>
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <div>

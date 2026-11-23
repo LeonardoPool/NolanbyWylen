@@ -42,14 +42,15 @@ import {
   guardarBiometriaFacialEmpleado,
   obtenerBiometriaFacialEmpleado,
   type EmpleadoRow,
+  type EmpleadoConBiometria,
 } from "../actions";
 import { generarDescriptorFacialDesdeCanvas } from "@/lib/biometria/face-id-engine";
 
 interface EmpleadoDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  empleadoAEditar?: EmpleadoRow | null;
-  onSaved: (empleado: EmpleadoRow, esNuevo: boolean) => void;
+  empleadoAEditar?: EmpleadoConBiometria | null;
+  onSaved: (empleado: EmpleadoConBiometria, esNuevo: boolean) => void;
 }
 
 const PUESTOS_SUGERIDOS = [
@@ -421,7 +422,10 @@ export function EmpleadoDialog({
           esEdicion ? "Empleado actualizado" : "Empleado registrado",
           res.message || "Los datos se guardaron con éxito en la base de datos."
         );
-        onSaved(res.empleado, !esEdicion);
+        const tieneBiometriaResult = Boolean(
+          (nuevoDescriptorFacial && nuevaFotoFacial) || biometriaEnroladaPrevia
+        );
+        onSaved({ ...res.empleado, tieneBiometria: tieneBiometriaResult }, !esEdicion);
         onClose();
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Error de comunicación con el servidor.";
@@ -528,8 +532,12 @@ export function EmpleadoDialog({
           >
             <ScanFace className="h-3.5 w-3.5 text-emerald-600" />
             Face ID & Biometría
-            {(biometriaEnroladaPrevia || nuevoDescriptorFacial) && (
+            {biometriaEnroladaPrevia || nuevoDescriptorFacial ? (
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+            ) : (
+              <span className="px-1.5 py-0.5 rounded text-[9px] bg-amber-50 text-amber-800 font-medium border border-amber-300">
+                Pendiente
+              </span>
             )}
           </button>
         </div>
@@ -1020,15 +1028,37 @@ export function EmpleadoDialog({
           {/* PESTAÑA 4: FACE ID & BIOMETRÍA FACIAL */}
           {pestañaActiva === "biometria" && (
             <div className="space-y-4 animate-in fade-in duration-100">
-              <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/40 p-3.5 space-y-1">
-                <div className="flex items-center gap-2 text-emerald-900 font-semibold text-xs">
-                  <ScanFace className="h-4 w-4 text-emerald-600" />
-                  <span>Control Biométrico Anti-Fraude (Face ID)</span>
+              {/* Alerta de Biometría Pendiente o Explicación */}
+              {!nuevaFotoFacial && !biometriaEnroladaPrevia ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3.5 space-y-1.5">
+                  <div className="flex items-center gap-2 text-amber-900 font-semibold text-xs">
+                    <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                    <span>Configuración Biométrica Face ID</span>
+                    <Badge variant="outline" className="text-[10px] bg-white text-amber-800 border-amber-300 ml-auto">
+                      Biometría Pendiente
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] text-amber-900 font-medium leading-relaxed">
+                    Hace falta configurar el dato biométrico para que pueda checar su entrada y salida.
+                  </p>
+                  <p className="text-[11px] text-amber-700 leading-relaxed">
+                    Puedes dar de alta o guardar al empleado sin foto ahora. El colaborador aparecerá con la etiqueta <strong>Biometría Pendiente</strong> y podrá enrolar su Face ID directamente desde su celular en su primer acceso al checador web, o puedes tomarle la foto aquí en cualquier momento.
+                  </p>
                 </div>
-                <p className="text-[11px] text-emerald-800/90 leading-relaxed">
-                  Genera una plantilla biométrica de 128 dimensiones basada en rasgos faciales. Esta muestra servirá para cotejo 1:1 estricto cada vez que el trabajador marque asistencia en el checador móvil, evitando suplantación o "buddy punching".
-                </p>
-              </div>
+              ) : (
+                <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/40 p-3.5 space-y-1">
+                  <div className="flex items-center gap-2 text-emerald-900 font-semibold text-xs">
+                    <ScanFace className="h-4 w-4 text-emerald-600" />
+                    <span>Control Biométrico Anti-Fraude (Face ID)</span>
+                    <Badge variant="outline" className="text-[10px] bg-emerald-100 text-emerald-800 border-emerald-300 ml-auto">
+                      Face ID Activo
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] text-emerald-800/90 leading-relaxed">
+                    Plantilla biométrica de 128 dimensiones basada en rasgos faciales e inmune al color de ropa o iluminación. Cotejo 1:1 estricto cada vez que el trabajador marque asistencia en el checador móvil.
+                  </p>
+                </div>
+              )}
 
               {/* Estado actual de biometría */}
               <div className="rounded-xl border border-zinc-200 bg-[#F9F9FB] p-4 space-y-3">
@@ -1044,7 +1074,7 @@ export function EmpleadoDialog({
                         />
                       </div>
                     ) : (
-                      <div className="h-12 w-12 rounded-xl bg-zinc-100 border border-zinc-200 text-zinc-400 flex items-center justify-center shrink-0">
+                      <div className="h-12 w-12 rounded-xl bg-amber-50 border border-amber-200 text-amber-500 flex items-center justify-center shrink-0">
                         <ScanFace className="h-6 w-6" strokeWidth={1.5} />
                       </div>
                     )}
@@ -1064,14 +1094,14 @@ export function EmpleadoDialog({
                               ? "bg-blue-50 text-blue-700 border-blue-200"
                               : biometriaEnroladaPrevia
                               ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              : "bg-zinc-100 text-zinc-600 border-zinc-200"
+                              : "bg-amber-50 text-amber-800 border-amber-300"
                           }`}
                         >
                           {nuevaFotoFacial
                             ? "Vector 128D Generado"
                             : biometriaEnroladaPrevia
                             ? "Activo 1:1"
-                            : "Pendiente"}
+                            : "Biometría Pendiente"}
                         </Badge>
                       </div>
                       <p className="text-[11px] text-zinc-500 mt-0.5">
@@ -1079,7 +1109,7 @@ export function EmpleadoDialog({
                           ? "Haz clic en 'Guardar Cambios' para persistir el vector en el servidor seguro."
                           : fechaEnrolamientoPrevia
                           ? `Enrolado el ${new Date(fechaEnrolamientoPrevia).toLocaleDateString("es-MX")}`
-                          : "Captura el rostro del empleado para habilitar la protección anti-fraude."}
+                          : "Hace falta configurar el dato biométrico para que pueda checar su entrada y salida."}
                       </p>
                     </div>
                   </div>

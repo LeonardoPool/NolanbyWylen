@@ -473,7 +473,7 @@ export async function registrarMarcajeOnline(params: {
           success: false,
           fraudeFacial: true,
           similitudFacial: similitudFacialRegistrada,
-          error: `Alerta Anti-Fraude: El rostro capturado no coincide con el Face ID registrado de ${emp.nombre} (Similitud: ${similitudFacialRegistrada}%, requerido mínimo 82%). Marcaje rechazado por seguridad.`,
+          error: `Alerta Anti-Fraude: El rostro capturado no coincide con el Face ID registrado de ${emp.nombre} (Similitud: ${similitudFacialRegistrada}%, requerido mínimo 74%). Marcaje rechazado por seguridad.`,
         };
       }
 

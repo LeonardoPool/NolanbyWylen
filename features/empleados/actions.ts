@@ -8,12 +8,13 @@ import type { Database, Json } from "@/types/database.types";
 
 export type EmpleadoRow = Database["public"]["Tables"]["empleados"]["Row"];
 export type RolUsuario = Database["public"]["Tables"]["perfiles"]["Row"]["rol"];
+export type EmpleadoConBiometria = EmpleadoRow & { tieneBiometria?: boolean };
 
 export interface EmpleadoActionResult {
   success: boolean;
   message?: string;
   error?: string;
-  empleado?: EmpleadoRow;
+  empleado?: EmpleadoConBiometria;
 }
 
 interface AdminAuthCheck {
@@ -121,7 +122,7 @@ function mapearErrorPostgres(error: { code?: string; message?: string }): string
  * Obtiene el catálogo completo de empleados y el rol del usuario autenticado.
  */
 export async function obtenerCatalogoEmpleados(): Promise<{
-  empleados: EmpleadoRow[];
+  empleados: EmpleadoConBiometria[];
   rol: RolUsuario;
   error?: string;
 }> {
@@ -160,8 +161,30 @@ export async function obtenerCatalogoEmpleados(): Promise<{
     };
   }
 
+  // Consultar de forma eficiente los IDs de empleados que cuentan con modelo biométrico Face ID registrado
+  let idsConBiometria = new Set<string>();
+  try {
+    const adminClient = createAdminClient();
+    const { data: archivos } = await adminClient.storage
+      .from(BUCKET_BIOMETRIA)
+      .list("descriptores");
+
+    if (archivos && Array.isArray(archivos)) {
+      idsConBiometria = new Set(
+        archivos.map((a) => a.name.replace(/\.json$/i, ""))
+      );
+    }
+  } catch (errBiom) {
+    console.warn("[Catálogo Empleados] Aviso al listar descriptores biométricos:", errBiom);
+  }
+
+  const empleadosMapeados: EmpleadoConBiometria[] = (data ?? []).map((emp) => ({
+    ...emp,
+    tieneBiometria: idsConBiometria.has(emp.id),
+  }));
+
   return {
-    empleados: data ?? [],
+    empleados: empleadosMapeados,
     rol,
   };
 }
