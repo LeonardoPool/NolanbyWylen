@@ -10,8 +10,10 @@ export const empleadoSchema = z.object({
   codigo_biometrico: z
     .string()
     .trim()
-    .min(1, "El código biométrico del checador es obligatorio.")
-    .max(50, "El código biométrico no puede exceder 50 caracteres."),
+    .max(50, "El código biométrico no puede exceder 50 caracteres.")
+    .optional()
+    .nullable()
+    .transform((val) => (val && val.length > 0 ? val : null)),
   nombre: z
     .string()
     .trim()

@@ -226,12 +226,15 @@ export async function crearEmpleado(formData: FormData): Promise<EmpleadoActionR
   const supabase = await createClient();
   const payload = validation.data;
 
-  const { data: nuevoEmpleado, error } = await supabase
-    .from("empleados")
-    .insert({
-      numero_empleado: payload.numero_empleado,
-      codigo_biometrico: payload.codigo_biometrico,
-      nombre: payload.nombre,
+    const codigoBiometricoFinal =
+      payload.codigo_biometrico || `EMP_${payload.numero_empleado}`;
+
+    const { data: nuevoEmpleado, error } = await supabase
+      .from("empleados")
+      .insert({
+        numero_empleado: payload.numero_empleado,
+        codigo_biometrico: codigoBiometricoFinal,
+        nombre: payload.nombre,
       apellidos: payload.apellidos,
       puesto: payload.puesto,
       telefono: payload.telefono,
@@ -346,11 +349,14 @@ export async function actualizarEmpleado(
 
   const payload = validation.data;
 
+  const codigoBiometricoFinal =
+    payload.codigo_biometrico || previo.codigo_biometrico || `EMP_${payload.numero_empleado}`;
+
   const { data: actualizado, error } = await supabase
     .from("empleados")
     .update({
       numero_empleado: payload.numero_empleado,
-      codigo_biometrico: payload.codigo_biometrico,
+      codigo_biometrico: codigoBiometricoFinal,
       nombre: payload.nombre,
       apellidos: payload.apellidos,
       puesto: payload.puesto,

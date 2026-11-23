@@ -74,6 +74,10 @@ export function EmpleadoDialog({
   const [errorLocal, setErrorLocal] = useState<string | null>(null);
   const [pestañaActiva, setPestañaActiva] = useState<"general" | "fiscal" | "acceso" | "biometria">("general");
 
+  const STORAGE_KEY_BORRADOR_ALTA = "nolan_borrador_alta_empleado";
+  const [borradorRestaurado, setBorradorRestaurado] = useState(false);
+  const [mostrarConfirmacionSalida, setMostrarConfirmacionSalida] = useState(false);
+
   // Form states
   const [numeroEmpleado, setNumeroEmpleado] = useState("");
   const [codigoBiometrico, setCodigoBiometrico] = useState("");
@@ -149,8 +153,10 @@ export function EmpleadoDialog({
     setNuevaFotoFacial(null);
     setCamaraBiometriaActiva(false);
     setCamaraBiometriaError(null);
+    setMostrarConfirmacionSalida(false);
 
     if (empleadoAEditar) {
+      setBorradorRestaurado(false);
       setNumeroEmpleado(empleadoAEditar.numero_empleado || "");
       setCodigoBiometrico(empleadoAEditar.codigo_biometrico || "");
       setNombre(empleadoAEditar.nombre || "");
@@ -175,6 +181,50 @@ export function EmpleadoDialog({
         setFechaEnrolamientoPrevia(res.fechaEnrolamiento || null);
       });
     } else {
+      // Si es un alta nueva, verificar si existe un borrador guardado en localStorage
+      try {
+        const borradorGuardado = typeof window !== "undefined"
+          ? localStorage.getItem(STORAGE_KEY_BORRADOR_ALTA)
+          : null;
+
+        if (borradorGuardado) {
+          const b = JSON.parse(borradorGuardado);
+          if (
+            b &&
+            (b.numeroEmpleado ||
+              b.nombre ||
+              b.apellidos ||
+              b.puesto ||
+              b.telefono ||
+              b.curp ||
+              b.correo)
+          ) {
+            setNumeroEmpleado(b.numeroEmpleado || "");
+            setCodigoBiometrico(b.codigoBiometrico || "");
+            setNombre(b.nombre || "");
+            setApellidos(b.apellidos || "");
+            setPuesto(b.puesto || "");
+            setTelefono(b.telefono || "");
+            setFechaIngreso(b.fechaIngreso || new Date().toISOString().slice(0, 10));
+            setNss(b.nss || "");
+            setRfc(b.rfc || "");
+            setCurp(b.curp || "");
+            setCorreo(b.correo || "");
+            setPin(b.pin || "");
+            setPermiteChecadoWeb(b.permiteChecadoWeb ?? true);
+            setHaTomadoVacaciones(b.haTomadoVacaciones ?? null);
+            setDiasTomadosVacaciones(b.diasTomadosVacaciones ?? 0);
+            setBorradorRestaurado(true);
+            setErrorLocal(null);
+            setPestañaActiva(b.pestañaActiva || "general");
+            return;
+          }
+        }
+      } catch (errDraft) {
+        console.warn("[Borrador] Error al leer borrador local:", errDraft);
+      }
+
+      setBorradorRestaurado(false);
       setNumeroEmpleado("");
       setCodigoBiometrico("");
       setNombre("");
@@ -197,6 +247,164 @@ export function EmpleadoDialog({
     setErrorLocal(null);
     setPestañaActiva("general");
   }, [empleadoAEditar, isOpen]);
+
+  // Autoguardado continuo de borrador en localStorage durante la creación
+  useEffect(() => {
+    if (!isOpen || esEdicion || typeof window === "undefined") return;
+
+    const tieneDatos = Boolean(
+      numeroEmpleado ||
+      codigoBiometrico ||
+      nombre ||
+      apellidos ||
+      puesto ||
+      telefono ||
+      nss ||
+      rfc ||
+      curp ||
+      correo ||
+      pin
+    );
+
+    if (tieneDatos) {
+      try {
+        const payloadBorrador = {
+          numeroEmpleado,
+          codigoBiometrico,
+          nombre,
+          apellidos,
+          puesto,
+          telefono,
+          fechaIngreso,
+          nss,
+          rfc,
+          curp,
+          correo,
+          pin,
+          permiteChecadoWeb,
+          haTomadoVacaciones,
+          diasTomadosVacaciones,
+          pestañaActiva,
+          fechaActualizacion: new Date().toISOString(),
+        };
+        localStorage.setItem(STORAGE_KEY_BORRADOR_ALTA, JSON.stringify(payloadBorrador));
+      } catch (errSave) {
+        console.warn("[Borrador] Error al guardar borrador local:", errSave);
+      }
+    }
+  }, [
+    isOpen,
+    esEdicion,
+    numeroEmpleado,
+    codigoBiometrico,
+    nombre,
+    apellidos,
+    puesto,
+    telefono,
+    fechaIngreso,
+    nss,
+    rfc,
+    curp,
+    correo,
+    pin,
+    permiteChecadoWeb,
+    haTomadoVacaciones,
+    diasTomadosVacaciones,
+    pestañaActiva,
+  ]);
+
+  // Detección de cambios sin guardar
+  const hayCambiosSinGuardar = useMemo(() => {
+    if (esEdicion && empleadoAEditar) {
+      return (
+        numeroEmpleado !== (empleadoAEditar.numero_empleado || "") ||
+        codigoBiometrico !== (empleadoAEditar.codigo_biometrico || "") ||
+        nombre !== (empleadoAEditar.nombre || "") ||
+        apellidos !== (empleadoAEditar.apellidos || "") ||
+        puesto !== (empleadoAEditar.puesto || "") ||
+        telefono !== (empleadoAEditar.telefono || "") ||
+        nss !== (empleadoAEditar.nss || "") ||
+        rfc !== (empleadoAEditar.rfc || "") ||
+        curp !== (empleadoAEditar.curp || "") ||
+        correo !== (empleadoAEditar.correo || "") ||
+        pin !== (empleadoAEditar.pin || "") ||
+        Boolean(nuevoDescriptorFacial)
+      );
+    }
+    return Boolean(
+      numeroEmpleado ||
+      codigoBiometrico ||
+      nombre ||
+      apellidos ||
+      puesto ||
+      telefono ||
+      nss ||
+      rfc ||
+      curp ||
+      correo ||
+      pin ||
+      nuevoDescriptorFacial
+    );
+  }, [
+    esEdicion,
+    empleadoAEditar,
+    numeroEmpleado,
+    codigoBiometrico,
+    nombre,
+    apellidos,
+    puesto,
+    telefono,
+    nss,
+    rfc,
+    curp,
+    correo,
+    pin,
+    nuevoDescriptorFacial,
+  ]);
+
+  // Advertencia de navegador al intentar salir de la app o recargar si hay cambios sin guardar
+  useEffect(() => {
+    if (!isOpen || !hayCambiosSinGuardar) return;
+
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "Tienes cambios sin guardar en el formulario.";
+      return e.returnValue;
+    };
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [isOpen, hayCambiosSinGuardar]);
+
+  function intentarCerrar() {
+    if (isPending) return;
+    if (hayCambiosSinGuardar) {
+      setMostrarConfirmacionSalida(true);
+    } else {
+      detenerCamaraBiometria();
+      onClose();
+    }
+  }
+
+  function descartarBorradorYSalir() {
+    try {
+      localStorage.removeItem(STORAGE_KEY_BORRADOR_ALTA);
+    } catch {}
+    setBorradorRestaurado(false);
+    setMostrarConfirmacionSalida(false);
+    detenerCamaraBiometria();
+    onClose();
+  }
+
+  function salirConservandoBorrador() {
+    setMostrarConfirmacionSalida(false);
+    detenerCamaraBiometria();
+    notify.info(
+      "Borrador conservado",
+      "Tus datos pendientes quedaron guardados localmente para cuando vuelvas a abrir el formulario."
+    );
+    onClose();
+  }
 
   // Limpieza de cámara al cerrar componente
   useEffect(() => {
@@ -362,9 +570,37 @@ export function EmpleadoDialog({
     e.preventDefault();
     setErrorLocal(null);
 
+    // Validaciones preventivas de campos esenciales
+    if (!numeroEmpleado.trim()) {
+      setPestañaActiva("general");
+      setErrorLocal("El número de empleado es obligatorio.");
+      notify.error("Campo requerido", "Ingresa el número de empleado.");
+      return;
+    }
+    if (!nombre.trim()) {
+      setPestañaActiva("general");
+      setErrorLocal("El nombre del empleado es obligatorio.");
+      notify.error("Campo requerido", "Ingresa el nombre del empleado.");
+      return;
+    }
+    if (!apellidos.trim()) {
+      setPestañaActiva("general");
+      setErrorLocal("Los apellidos del empleado son obligatorios.");
+      notify.error("Campo requerido", "Ingresa los apellidos del empleado.");
+      return;
+    }
+    if (!puesto.trim()) {
+      setPestañaActiva("general");
+      setErrorLocal("El puesto u oficio es obligatorio.");
+      notify.error("Campo requerido", "Ingresa o selecciona el puesto del empleado.");
+      return;
+    }
+
     const formData = new FormData();
     formData.append("numero_empleado", numeroEmpleado.trim().toUpperCase());
-    formData.append("codigo_biometrico", codigoBiometrico.trim());
+    if (codigoBiometrico.trim()) {
+      formData.append("codigo_biometrico", codigoBiometrico.trim());
+    }
     formData.append("nombre", nombre.trim());
     formData.append("apellidos", apellidos.trim());
     formData.append("puesto", puesto.trim());
@@ -417,6 +653,12 @@ export function EmpleadoDialog({
           }
         }
 
+        // Limpiar borrador local al guardar exitosamente
+        try {
+          localStorage.removeItem(STORAGE_KEY_BORRADOR_ALTA);
+        } catch {}
+        setBorradorRestaurado(false);
+
         detenerCamaraBiometria();
         notify.success(
           esEdicion ? "Empleado actualizado" : "Empleado registrado",
@@ -439,11 +681,11 @@ export function EmpleadoDialog({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-zinc-950/60 backdrop-blur-xs animate-in fade-in duration-150 overflow-y-auto"
       onClick={(e) => {
-        if (e.target === e.currentTarget && !isPending) onClose();
+        if (e.target === e.currentTarget && !isPending) intentarCerrar();
       }}
     >
       <div
-        className="w-full max-w-xl rounded-2xl bg-white border border-zinc-200/90 shadow-2xl overflow-hidden my-6"
+        className="w-full max-w-xl rounded-2xl bg-white border border-zinc-200/90 shadow-2xl overflow-hidden my-6 relative"
         role="dialog"
         aria-modal="true"
       >
@@ -464,15 +706,15 @@ export function EmpleadoDialog({
               <p className="text-[11px] text-zinc-500">
                 {esEdicion
                   ? "Modifica datos laborales, fiscales y credenciales de acceso online."
-                  : "Registra al trabajador con vinculación biométrica y acceso para checado web."}
+                  : "Registra al trabajador. La fotografía biométrica es opcional y puede configurarse después."}
               </p>
             </div>
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={intentarCerrar}
             disabled={isPending}
-            className="text-zinc-400 hover:text-zinc-700 transition-colors p-1.5 rounded-lg hover:bg-zinc-100 disabled:opacity-50"
+            className="text-zinc-400 hover:text-zinc-700 transition-colors p-1.5 rounded-lg hover:bg-zinc-100 disabled:opacity-50 cursor-pointer"
             aria-label="Cerrar modal"
           >
             <X className="h-4 w-4" strokeWidth={1.75} />
@@ -544,6 +786,49 @@ export function EmpleadoDialog({
 
         {/* Formulario */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {borradorRestaurado && !esEdicion && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50/90 p-3 text-xs text-blue-900 flex items-center justify-between shadow-2xs animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-blue-600 shrink-0" />
+                <div>
+                  <span className="font-semibold block">Borrador local recuperado</span>
+                  <span className="text-[11px] text-blue-700">
+                    Se restauraron los datos que dejaste pendientes para que no tengas que capturarlos de nuevo.
+                  </span>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  try {
+                    localStorage.removeItem(STORAGE_KEY_BORRADOR_ALTA);
+                  } catch {}
+                  setBorradorRestaurado(false);
+                  setNumeroEmpleado("");
+                  setCodigoBiometrico("");
+                  setNombre("");
+                  setApellidos("");
+                  setPuesto("");
+                  setTelefono("");
+                  setFechaIngreso(new Date().toISOString().slice(0, 10));
+                  setNss("");
+                  setRfc("");
+                  setCurp("");
+                  setCorreo("");
+                  setPin("");
+                  setHaTomadoVacaciones(null);
+                  setDiasTomadosVacaciones(0);
+                  notify.info("Formulario limpiado", "Se descartó el borrador local.");
+                }}
+                className="h-7 text-[11px] text-blue-800 border-blue-300 hover:bg-blue-100 shrink-0 ml-2 cursor-pointer"
+              >
+                Descartar borrador
+              </Button>
+            </div>
+          )}
+
           {errorLocal && (
             <div className="rounded-xl border border-rose-200 bg-rose-50/80 p-3 text-xs text-rose-800">
               <span className="font-semibold">Atención:</span> {errorLocal}
@@ -579,22 +864,24 @@ export function EmpleadoDialog({
                 <div className="space-y-1.5">
                   <label
                     htmlFor="codigo_biometrico"
-                    className="text-xs font-medium text-zinc-700 flex items-center gap-1.5"
+                    className="text-xs font-medium text-zinc-700 flex items-center justify-between"
                   >
-                    <Fingerprint className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.5} />
-                    ID en Checador Físico (ZKTeco) <span className="text-rose-500">*</span>
+                    <span className="flex items-center gap-1.5">
+                      <Fingerprint className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.5} />
+                      ID en Checador Físico (ZKTeco)
+                    </span>
+                    <span className="text-[10px] text-zinc-400">Opcional</span>
                   </label>
                   <input
                     id="codigo_biometrico"
                     type="text"
-                    required
                     value={codigoBiometrico}
                     onChange={(e) => setCodigoBiometrico(e.target.value)}
-                    placeholder="Ej. 1, 102"
+                    placeholder="Ej. 1, 102 (o vacío para auto-asignar)"
                     disabled={isPending}
                     className="w-full rounded-xl border border-zinc-200 bg-[#F9F9FB] px-3 py-2 text-xs text-zinc-900 font-mono placeholder:text-zinc-400 focus:bg-white focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/5 transition-all"
                   />
-                  <p className="text-[10px] text-zinc-400">ID de usuario en el checador físico.</p>
+                  <p className="text-[10px] text-zinc-400">Opcional. Si se deja vacío, se auto-asigna para permitir el alta.</p>
                 </div>
               </div>
 
@@ -1268,8 +1555,8 @@ export function EmpleadoDialog({
                 variant="outline"
                 size="sm"
                 disabled={isPending}
-                onClick={onClose}
-                className="rounded-xl text-xs"
+                onClick={intentarCerrar}
+                className="rounded-xl text-xs cursor-pointer"
               >
                 Cancelar
               </Button>
@@ -1277,7 +1564,7 @@ export function EmpleadoDialog({
                 type="submit"
                 size="sm"
                 disabled={isPending}
-                className="rounded-xl text-xs shadow-xs"
+                className="rounded-xl text-xs shadow-xs cursor-pointer"
               >
                 {isPending ? (
                   <>
@@ -1293,6 +1580,55 @@ export function EmpleadoDialog({
             </div>
           </div>
         </form>
+
+        {/* Modal de confirmación para datos sin guardar */}
+        {mostrarConfirmacionSalida && (
+          <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-zinc-200 space-y-3.5">
+              <div className="flex items-center gap-2.5 text-amber-600">
+                <div className="h-9 w-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                  <AlertCircle className="h-5 w-5 text-amber-700" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-900">¿Salir del formulario?</h3>
+                  <p className="text-[11px] text-zinc-500">Tienes datos en edición sin guardar</p>
+                </div>
+              </div>
+              <p className="text-xs text-zinc-600 leading-relaxed">
+                {esEdicion
+                  ? "Si sales ahora, los cambios realizados en esta ficha se perderán."
+                  : "Los datos ingresados están respaldados en tu borrador local de este navegador para no perder tu avance."}
+              </p>
+              <div className="flex flex-col gap-2 pt-1">
+                <Button
+                  type="button"
+                  onClick={() => setMostrarConfirmacionSalida(false)}
+                  className="w-full text-xs cursor-pointer shadow-xs"
+                >
+                  Continuar editando
+                </Button>
+                {!esEdicion && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={salirConservandoBorrador}
+                    className="w-full text-xs text-blue-700 hover:bg-blue-50 border-blue-200 cursor-pointer"
+                  >
+                    Salir y conservar borrador
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={descartarBorradorYSalir}
+                  className="w-full text-xs text-rose-600 hover:bg-rose-50 cursor-pointer"
+                >
+                  Descartar datos y salir
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
